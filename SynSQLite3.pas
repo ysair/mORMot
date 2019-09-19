@@ -525,8 +525,8 @@ type
   // TObject(p).Free
   TSQLDestroyPtr = procedure(p: pointer); cdecl;
 
-  /// SQLite3 collation (i.e. sort and comparaison) function prototype
-  // - this function MUST use s1Len and s2Len parameters during the comparaison:
+  /// SQLite3 collation (i.e. sort and comparison) function prototype
+  // - this function MUST use s1Len and s2Len parameters during the comparison:
   // s1 and s2 are not zero-terminated
   // - used by sqlite3.create_collation low-level function
   TSQLCollateFunc = function(CollateParam: pointer; s1Len: integer; s1: pointer;
@@ -3264,6 +3264,7 @@ type
   /// background thread used for TSQLDatabase.BackupBackground() process
   TSQLDatabaseBackupThread = class(TThread)
   protected
+    fBackupDestFile: TFileName;
     fSourceDB: TSQLDatabase;
     fDestDB: TSQLDatabase;
     fStepPageNumber, fStepSleepMS: Integer;
@@ -3290,6 +3291,8 @@ type
     property DestDB: TSQLDatabase read fDestDB;
     /// the raised exception in case of backupFailure notification
     property FailureError: Exception read fError;
+    /// the backup target database file name
+    property BackupDestFile: TFileName read fBackupDestFile;
   published
     /// the current state of the backup process
     // - only set before a call to TSQLDatabaseBackupEvent
@@ -5639,7 +5642,7 @@ end;
 
 procedure TSQLStatementCached.Init(aDB: TSQLite3DB);
 begin
-  Caches.Init(TypeInfo(TSQLStatementCacheDynArray),Cache,nil,nil,nil,@Count);
+  Caches.InitSpecific(TypeInfo(TSQLStatementCacheDynArray),Cache,djRawUTF8,@Count);
   DB := aDB;
 end;
 
@@ -5714,6 +5717,7 @@ begin
   fBackup := Backup;
   fSourceDB := Source;
   fDestDB := Dest;
+  fBackupDestFile := Dest.fFileName;
   if StepPageNumber=0 then
     fStepPageNumber := 1 else
     fStepPageNumber := StepPageNumber;
@@ -5776,12 +5780,15 @@ begin
           raise ESQLite3Exception.Create('Backup process forced to terminate');
         SleepHiRes(fStepSleepMS);
       until false;
+      if fDestDB<>nil then begin
+        sqlite3.backup_finish(fBackup);
+        // close destination backup database
+        if fOwnerDest then
+          FreeAndNil(fDestDB);
+        fDestDB :=  nil;
+      end;
       if not IdemPChar(pointer(fn),SQLITE_MEMORY_DATABASE_NAME) then begin
         if fStepSynLzCompress then begin
-          sqlite3.backup_finish(fBackup);
-          if fOwnerDest then
-            FreeAndNil(fDestDB) else // close destination backup database
-            fDestDB :=  nil;
           NotifyProgressAndContinue(backupStepSynLz);
           fn2 := ChangeFileExt(fn, '.db.tmp');
           if not (RenameFile(fn,fn2) and TSQLDatabase.BackupSynLZ(fn2,fn,true)) then

@@ -85,7 +85,7 @@ program TestSQL3;
   {$endif}
 {$endif}
 
-{$I Synopse.inc} // define HASINLINE USETYPEINFO CPU32 CPU64 OWNNORMTOUPPER
+{$I Synopse.inc} // define HASINLINE USETYPEINFO CPU32 CPU64 USELIBCURL
 
 {.$define ForceFastMM4}
 // for debug/tests purposes
@@ -115,6 +115,9 @@ uses
     SynEcc in '..\SynEcc.pas',
     SynCrtSock in '..\SynCrtSock.pas',
     SynBidirSock in '..\SynBiDirSock.pas',
+    {$ifdef USELIBCURL}
+      SynCurl,
+    {$endif USELIBCURL}
     //SynOpenSSL,
     SynCommons in '..\SynCommons.pas',
     SynLog in '..\SynLog.pas',
@@ -138,6 +141,7 @@ uses
           dddInfraEmailer in 'DDD\infra\dddInfraEmailer.pas',
           dddInfraRepoUser in 'DDD\infra\dddInfraRepoUser.pas',
         {$endif NOVARIANTS}
+        SynZipFiles in '..\SynZipFiles.pas',
       {$endif LVCL}
       {$ifdef MSWINDOWS}
         {$ifndef CPU64}
@@ -146,9 +150,6 @@ uses
         {$endif CPU64}
         SynTable in '..\SynTable.pas',
         SynBigTable in '..\SynBigTable.pas',
-        {$ifndef LVCL}
-          SynZipFiles in '..\SynZipFiles.pas',
-        {$endif}
       {$endif MSWINDOWS}
       SynSQLite3 in '..\SynSQLite3.pas',
       SynSQLite3Static in '..\SynSQLite3Static.pas',

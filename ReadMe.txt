@@ -12,6 +12,7 @@ Contributors
   Alexander (volax)
   AlexPirate
   Alfred Glaenzer (alf)
+  Andre Heider (dhewg)
   Arnaud Bouchez
   ASiwon
   Aweste
@@ -60,7 +61,7 @@ Contributors
   Nzsolt
   Oleg Tretyakov
   Ondrej (reddwarf)
-  Pavel (mpv)
+  Pavel Mashlyakovskii (mpv)
   Pierre le Riche
   RalfS
   Richard6688
@@ -70,6 +71,7 @@ Contributors
   Sllimr7139
   SSoftPro
   Stefan (itSDS)
+  Svetozar Belic (transmogrifix)
   Transmogrifix
   Uian2000
   Vaclav

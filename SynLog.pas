@@ -1075,6 +1075,8 @@ type
     procedure DisableRemoteLog(value: boolean);
     /// the associated TSynLog class
     function LogClass: TSynLogClass; {$ifdef HASINLINENOTX86}inline;{$endif}
+    /// Force log rotation; Can be used for example inside SUGHUP signal handler
+    procedure ForceRotation;
     /// direct access to the low-level writing content
     // - should usually not be used directly, unless you ensure it is safe
     property Writer: TTextWriter read fWriter;
@@ -1721,7 +1723,7 @@ begin
     L := FromVarUInt32(P); // inlined R.Read(S^.Name)
     FastSetString(S^.Name,P,L);
     inc(P,L);
-    inc(PtrUInt(S),A.ElemSize); // may be TSynMapSymbol or TSynMapUnit
+    inc(PByte(S),A.ElemSize); // may be TSynMapSymbol or TSynMapUnit
   end;
   S := A.Value^;
   Addr := FromVarUInt32(P);
@@ -1729,7 +1731,7 @@ begin
   for i := 1 to n-1 do begin
     inc(Addr,FromVarUInt32(P));
     S^.Stop := Addr-1;
-    inc(PtrUInt(S),A.ElemSize);
+    inc(PByte(S),A.ElemSize);
     S^.Start := Addr;
   end;
   S^.Stop := Addr+FromVarUInt32(P);
@@ -2019,8 +2021,8 @@ procedure WriteSymbol(var W: TFileBufferWriter; const A: TDynArray);
 var i, n: integer;
     Diff: integer;
     S: PSynMapSymbol;
-    P: PByte;
-    Beg: PtrUInt;
+    P,Beg: PByte;
+    tmp: RawByteString;
 begin
   n := A.Count;
   W.WriteVarUInt32(n);
@@ -2028,20 +2030,20 @@ begin
   S := A.Value^;
   for i := 0 to n-1 do begin
     W.Write(S^.Name);
-    inc(PtrUInt(S),A.ElemSize); // may be TSynMapSymbol or TSynMapUnit
+    inc(PByte(S),A.ElemSize); // may be TSynMapSymbol or TSynMapUnit
   end;
   S := A.Value^;
   Diff := S^.Start;
   W.WriteVarUInt32(Diff);
-  P := W.WriteDirectStart(n*5,A.ArrayTypeName);
-  Beg := PtrUInt(P);
+  P := pointer(W.DirectWritePrepare(n*5,tmp));
+  Beg := P;
   for i := 1 to n-1 do begin
-    inc(PtrUInt(S),A.ElemSize);
+    inc(PByte(S),A.ElemSize);
     P := ToVarUInt32(S^.Start-Diff,P);
     Diff := S^.Start;
   end;
   P := ToVarUInt32(S^.Stop-Diff,P);
-  W.WriteDirectEnd(PtrUInt(P)-Beg);
+  W.DirectWriteFlush(PtrUInt(P)-PtrUInt(Beg),tmp);
 end;
 
 procedure TSynMapFile.SaveToStream(aStream: TStream);
@@ -2973,15 +2975,8 @@ begin // avoid linking of ComObj.pas just for EOleSysError
     if IdemPropName(PShortString(PPointer(PtrInt(E)+vmtClassName)^)^,Name) then begin
       result := true;
       exit;
-    end else begin
-      {$ifdef FPC}
-      E := E.ClassParent;
-      {$else}
-      E := PPointer(PtrInt(E)+vmtParent)^;
-      if E<>nil then
-        E := PPointer(E)^;
-      {$endif}
-    end;
+    end else
+      E := GetClassParent(E);
   result := false;
 end;
 
@@ -4183,6 +4178,16 @@ begin
   if self=nil then
     result := nil else
     result := PPointer(self)^;
+end;
+
+procedure TSynLog.ForceRotation;
+begin
+  EnterCriticalSection(GlobalThreadLock);
+  try
+    PerformRotation;
+  finally
+    LeaveCriticalSection(GlobalThreadLock);
+  end;
 end;
 
 procedure TSynLog.DisableRemoteLog(value: boolean);
