@@ -1268,7 +1268,7 @@ With {\i mORMot}, your software solution will never be stuck in a dead-end. You'
 SourcePath=Lib\SQLite3
 IncludePath=Lib;Lib\SQLite3;Lib\SynDBDataset;Lib\CrossPlatform;Lib\SQLite3\DDD\dom;Lib\SQLite3\DDD\infra;Zeos\src
 ;Lib\SQLite3\Samples\MainDemo
-SourceFile=TestSQL3.dpr;SynLog.pas;SynTests.pas;mORMot.pas;mORMoti18n.pas;mORMotToolBar.pas;mORMotUI.pas;mORMotUIEdit.pas;mORMotMVC.pas;mORMotUILogin.pas;mORMotReport.pas;mORMotUIOptions.pas;mORMotUIQuery.pas;mORMotService.pas;mORMotSQLite3.pas;mORMotHttpClient.pas;mORMotHttpServer.pas;SynSQLite3.pas;SynSQLite3Static.pas;SynSQLite3RegEx.pas;SynDB.pas;SynOleDB.pas;SynDBOracle.pas;SynDBSQLite3.pas;SynDBODBC.pas;SynDBDataset.pas;SynDBZeos.pas;SynDBFireDAC.pas;SynDBUniDAC.pas;SynDBBDE.pas;SynDBNexusDB.pas;SynDBVCL.pas;mORMotReport.pas;mORMotVCL.pas;mORMotDB.pas;mORMotFastCGIServer.pas;SynSM.pas;SynDBMidasVCL.pas;mORMotMidasVCL.pas;SynMongoDB.pas;SynFastWideString.pas;SynCrossPlatformJSON.pas;SynCrossPlatformREST.pas;SynCrossPlatformSpecific.pas;SynCrossPlatformTests.pas;dddInfraSettings.pas
+SourceFile=TestSQL3.dpr;SynLog.pas;SynTests.pas;mORMot.pas;mORMoti18n.pas;mORMotToolBar.pas;mORMotUI.pas;mORMotUIEdit.pas;mORMotMVC.pas;mORMotUILogin.pas;mORMotReport.pas;mORMotUIOptions.pas;mORMotUIQuery.pas;mORMotService.pas;mORMotSQLite3.pas;mORMotHttpClient.pas;mORMotHttpServer.pas;SynSQLite3.pas;SynSQLite3Static.pas;SynSQLite3RegEx.pas;SynCrtSock.pas;SynCurl.pas;SynDB.pas;SynOleDB.pas;SynDBOracle.pas;SynDBSQLite3.pas;SynDBODBC.pas;SynDBDataset.pas;SynDBZeos.pas;SynDBFireDAC.pas;SynDBUniDAC.pas;SynDBBDE.pas;SynDBNexusDB.pas;SynDBVCL.pas;mORMotReport.pas;mORMotVCL.pas;mORMotDB.pas;mORMotFastCGIServer.pas;SynSM.pas;SynDBMidasVCL.pas;mORMotMidasVCL.pas;SynMongoDB.pas;SynFastWideString.pas;SynCrossPlatformJSON.pas;SynCrossPlatformREST.pas;SynCrossPlatformSpecific.pas;SynCrossPlatformTests.pas;dddInfraSettings.pas
 ;Samples\MainDemo\SynFile.dpr
 SourceIgnoreSymbol=select,check,open,connect,send,sqlite3,mORMot,JavaScript,cypher,execute,cache
 SourceIgnoreSymbolByUnit=SynCrossPlatformJSON,SynCrossPlatformREST,SynCrossPlatformSpecific,SynCrossPlatformTests
@@ -1695,6 +1695,17 @@ You can also allocate directly the {\f1\fs20 TDocVariantData} instance on stack,
 !  Doc2.I['birthyear'] := 1982;
 !  writeln(Doc2.ToJSON);         // will write '{"name":"Paul","birthyear":1982}'
 You do not need to protect the stack-allocated {\f1\fs20 TDocVariantData} instances with a {\f1\fs20 try..finally}, since the compiler will do it for your. Take a look at all the methods and properties of {\f1\fs20 TDocVariantData}.
+:   FPC restrictions
+You should be warning that with the {\i @*FreePascal@} compiler, calling late-binding functions with arguments (like {\f1\fs20 Add} or {\f1\fs20 Delete}) would most probably fail to work as expected.\line We have found out that the following code may trigger some random access violations:
+!  doc.Add('text');
+!  doc.Add(anotherdocvariant);
+So you should access instead directly the underlying :
+!  TDocVariantData(doc).AddItem('text');
+!  TDocVariantData(doc).AddItem(anotherdocvariant);
+Or using {\f1\fs20 _Safe()}:
+!  DocVariantData(doc)^.AddItem('text');
+In fact, late-binding functions arguments seem to work only for simple values (like {\f1\fs20 integer} or {\f1\fs20 double}), but not complex types (like {\f1\fs20 string} or other {\f1\fs20 TDocVariantData}), which generate some random GPF, especially when {\f1\fs20 heaptrc} paranoid memory checks are enabled.
+As a result, direct access to {\f1\fs20 TJSONVariantData} instances - preferably via {\f1\fs20 _Safe()}, and not a {\f1\fs20 variant} variable, will be faster and less error-prone when using FPC.
 :   Variant array documents
 With {\f1\fs20 _Arr()}, an {\i array} {\f1\fs20 variant} instance will be initialized with data supplied as a list of {\i Value1,Value2,...}, e.g.
 !var V1,V2: variant; // stored as any variant
@@ -1815,10 +1826,10 @@ Note that a set of global functions have been defined, which allows direct creat
 When working with complex documents, e.g. with @*BSON@ / {\i @*MongoDB@} documents, almost all content will be created in "fast" {\i per-reference} mode.
 :  Advanced TDocVariant process
 :194   Number values options
-By default, {\f1\fs20 TDocVariantData} will only recognize {\f1\fs20 integer}, {\f1\fs20 Int64} and {\f1\fs20 currency} - see @33@ - as number values. Any floating point value which may not be translated to/from @*JSON@ textual representation safely will be stored as a JSON string, i.e. if it does match an integer or up to 4 fixed decimals, with 64-bit precision.
-You can set the {\f1\fs20 @*dvoAllowDoubleValue@} option to {\f1\fs20 TDocVariantData}, so that such numbers will be recognized and stored as {\f1\fs20 @*double@}. In this case, only {\f1\fs20 varDouble} storage will be used for the {\f1\fs20 variant} values, i.e. 32-bit IEEE storage, handling 5.0 x 10^-324 .. 1.7 x 10^308 range. With such floating-point values, you may loose precision and digits during the JSON serialization process. This is why it is not enabled by default.
-Also note that some JSON engines do not support 64-bit integer numbers. For instance, {\f1\fs20 @*JavaScript@} engines only store up to @*53-bit@ of information without precision loss, due to their internal storage as a 8 bytes IEEE 754 container. In some cases, it is safest to use JSON string representation of such numbers, as is done with the {\f1\fs20 woIDAsIDstr} value of {\f1\fs20 TTextWriterWriteObjectOption} for safe serialization of {\f1\fs20 TSQLRecord.ID} ORM values.
-If you want to work with high-precision floating point numbers, consider using {\f1\fs20 @*TDecimal128@} values, as implemented in {\f1\fs20 SynMongoDB.pas}, which supports 128-bit high precision decimal, as defined by the {\i IEEE 754-2008 128-bit decimal floating point} standard, and handled in {\i MongoDB} 3.4+.
+By default, {\f1\fs20 TDocVariantData} will only recognize {\f1\fs20 integer}, {\f1\fs20 Int64} and {\f1\fs20 currency} - see @33@ - as number values. Any floating point value which may not be translated to/from @*JSON@ textual representation safely will be stored as a JSON string, i.e. if it does match an integer or up to 4 fixed decimals, with 64-bit precision. We stated that JSON serialization should be conservative, i.e. serializing then unserializing (or the other way round) should return the very same value; parsing JSON is a matter of (difficult) choices - see @http://seriot.ch/parsing_json.php#5 - and we choose to be paranoid and not loose information by default.
+You can set the {\f1\fs20 @*dvoAllowDoubleValue@} option to {\f1\fs20 TDocVariantData}, so that such floating-point numbers will be recognized and stored as {\f1\fs20 @*double@}. In this case, only {\f1\fs20 varDouble} storage will be used for the {\f1\fs20 variant} values, i.e. 64-bit IEEE 754 {\f1\fs20 double} values, handling 5.0 x 10^-324 .. 1.7 x 10^308 range. With such floating-point values, you may loose precision and digits during the JSON serialization process: this is why it is not enabled by default.
+Also note that some JSON engines do not support 64-bit integer numbers. For instance, {\f1\fs20 @*JavaScript@} engines handle only up to @*53-bit@ of information without precision loss (called the {\i significand} bits), due to their internal storage as a 8 bytes IEEE 754 container. In some cases, it is safest to use JSON string representation of such numbers, as is done with the {\f1\fs20 woIDAsIDstr} value of {\f1\fs20 TTextWriterWriteObjectOption} for safe serialization of {\f1\fs20 TSQLRecord.ID} ORM values.
+If you want to work with high-precision floating point numbers, consider using {\f1\fs20 @*TDecimal128@} values, as implemented in {\f1\fs20 SynMongoDB.pas}, which supports 128-bit high precision decimal, as defined by the {\i IEEE 754-2008 128-bit decimal floating point} standard, and handled in {\i MongoDB} 3.4+. Their conversion to/from text - therefore to/from JSON - won't loose nor round any digit, as soon as the value fits in its 128-bit storage.
 :   Object or array document creation options
 As stated above, a {\f1\fs20 TDocVariantOptions} parameter enables to define the behavior of a {\f1\fs20 TDocVariant} custom type for a given instance. Please refer to the documentation of this set of options to find out the available settings. Some are related to the memory model, other to case-sensitivity of the property names, other to the behavior expected in case of non-existing property, and so on...
 Note that this setting is {\i local} to the given {\f1\fs20 variant} instance.
@@ -2356,7 +2367,7 @@ You can optionally specify the associated table, using a custom {\f1\fs20 TID} t
 !   property OrderedByCascade: TSQLRecordClientToBeDeletedID
 !     read fOrderedByCascade write fOrderedByCascade;
 !   ...
-Those three published fields will be able to store a {\f1\fs20 Int64} foreign key, and the ORM will ensure a corresponding {\i index} is created on the database, to speedup search on their values.\line But their type - {\f1\fs20 TID}, {\f1\fs20 TSQLRecordClientID}, or TSQLRecordClientToBeDeletedID - will define how the deletion process will be processed.
+Those three published fields will be able to store a {\f1\fs20 Int64} foreign key, and the ORM will ensure a corresponding {\i index} is created on the database, to speedup search on their values.\line But their type - {\f1\fs20 TID}, {\f1\fs20 TSQLRecordClientID}, or {\f1\fs20 TSQLRecordClientToBeDeletedID} - will define how the deletion process will be processed.
 By using the generic {\f1\fs20 TID} type, the first {\f1\fs20 Client} property won't have any reference to any table, so no deletion tracking will take place.
 On the other hand, {\i following the type naming convention}, the others {\f1\fs20 OrderedBy} and {\f1\fs20 OrderedByCascade} properties will be associated with the {\f1\fs20 TSQLRecordClient} table of the data model.\line In fact, the ORM will retrieve the {\f1\fs20 'TSQLRecordClientID'} or {\f1\fs20 'TSQLRecordClientToBeDeletedID'}  type names, and search for a {\f1\fs20 TSQLRecord} associated by trimming {\f1\fs20 *[ToBeDeleted]ID}, which is {\f1\fs20 TSQLRecordClient} in this case.\line As a result, the ORM will be able to track any {\f1\fs20 TSQLRecordClient} deletion: for any row pointing to the deleted record, it will ensure that this {\f1\fs20 OrderedBy} property will be reset to 0, or that the row containing the {\f1\fs20 OrderedByCascade} property will be deleted. Note that the framework won't define a {\f1\fs20 ON DELETE SET DEFAULT} or {\f1\fs20 ON DELETE CASCADE} foreign key via SQL, but emulate them {\i at ORM level}.
 :148  TRecordReference and TRecordReferenceToBeDeleted
@@ -7629,7 +7640,7 @@ In fact, there are several implementation of a @**HTTP@/1.1 clients, according t
 \TSQLHttpClientCurl\TSQLHttpClientGeneric
 \TSQLHttpClientWebsockets\TSQLHttpClientWinSock
 \
-So you can select either {\f1\fs20 TSQLHttpClientWinSock}, {\f1\fs20 TSQLHttpClientWinINet} or {\f1\fs20 TSQLHttpClientWinHTTP} for a HTTP/1.1 client, under {\i Windows}. By design, {\f1\fs20 TSQLHttpClientWinINet} or {\f1\fs20 TSQLHttpClientWinHTTP} are not available outside of Windows, but {\f1\fs20 TSQLHttpClientCurl} is a great option under Linux, if the {\f1\fs20 @**libcurl@} library is installed, especially if you want to use HTTPS.\line The {\f1\fs20 TSQLHttpClientWebsockets} class has the ability to {\i upgrade} the HTTP connection to the {\i @*WebSockets@} protocol, which will be used for dual ways callbacks - see @149@.
+So you can select either {\f1\fs20 TSQLHttpClientWinSock}, {\f1\fs20 TSQLHttpClientWinINet} or {\f1\fs20 TSQLHttpClientWinHTTP} for a HTTP/1.1 client, under {\i Windows}. By design, {\f1\fs20 TSQLHttpClientWinINet} or {\f1\fs20 TSQLHttpClientWinHTTP} are not available outside of Windows, but {\f1\fs20 TSQLHttpClientCurl} is a great option under Linux, if the {\f1\fs20 @**libcurl@} library is installed, especially if you want to use HTTPS - it will call {\f1\fs20 SynCurl.pas}.\line The {\f1\fs20 TSQLHttpClientWebsockets} class has the ability to {\i upgrade} the HTTP connection to the {\i @*WebSockets@} protocol, which will be used for dual ways callbacks - see @149@.
 Each class has its own architecture, and attaches itself to a Windows communication library, all based on {\i WinSock} API. As stated by their name, {\f1\fs20 TSQLHttpClientWinSock} will call directly the {\i WinSock} API, {\f1\fs20 TSQLHttpClientWinINet} will call {\i WinINet} API (as used by IE 6) and {\f1\fs20 TSQLHttpClientWinHTTP} will cal the latest {\i WinHTTP} API:
 - {\i WinSock} is the common user-space API to access the sockets stack of Windows, i.e. IP connection - it's able to handle any IP protocol, including TCP/IP, UDP/IP, and any protocol over it (including HTTP);
 - {\i WinINet} was designed as an HTTP API client platform that allowed the use of interactive message dialogs such as entering user credentials - it's able to handle HTTP and FTP protocols;
@@ -9920,9 +9931,10 @@ Handled types of parameters are:
 |%30%70
 |\b Delphi type|Remarks\b0
 |{\f1\fs20 boolean}|Transmitted as @*JSON@ true/false
-|{\f1\fs20 integer cardinal Int64 double currency @*TDateTime@ @*TDateTimeMS@}|Transmitted as JSON numbers
+|{\f1\fs20 integer cardinal Int64 double currency}|Transmitted as JSON numbers
 |enumerations|Transmitted as JSON number
 |set|Transmitted as JSON number - one bit per element (up to 32 elements)
+|{\f1\fs20 @*TDateTime@ @*TDateTimeMS@}|Transmitted as @*ISO 8601@ JSON text
 |{\f1\fs20 @*RawUTF8@ @*WideString@ @*SynUnicode@}|Transmitted as JSON text (@*UTF-8@ encoded)
 |{\f1\fs20 string}|Transmitted as UTF-8 JSON text, but prior to {\i Delphi} 2009, the framework will ensure that both client and server sides use the same ANSI code page - so you should better use {\f1\fs20 RawUTF8} everywhere
 |{\f1\fs20 @*RawJSON@}|UTF-8 buffer transmitted with no serialization (wheras a {\f1\fs20 RawUTF8} will be escaped as a JSON string) - expects to contain valid JSON content, e.g. for TSQLTableJSON requests
@@ -11801,15 +11813,15 @@ Feedback is needed for the mobile targets, via FMX.\line In fact, we rely for ou
 :   FreePascal clients
 {\f1\fs20 SynCrossPlatform*} units support the {\i @**FreePascal@} Compiler, in its 2.7.1 / 3.1.1 branches.\line Most of the code is shared with {\i Delphi}, including RTTI support and all supported types.
 Some restrictions apply, though.
-Due to a bug in {\i FreePascal} implementation of {\f1\fs20 variant} late binding, the following code won't work as expected:
+Due to a bug in {\i FreePascal} implementation of {\f1\fs20 variant} late binding, the following code won't work as expected on older revisions of FPC:
 !  doc.name2 := 3.1415926;
 !  doc.name := 'John';
-Under {\i FreePascal}, you have to write:
+Under oldest {\i FreePascal}, you have to write:
 !  TJSONVariantData(doc)['name2'] := 3.1415926;
 !  TJSONVariantData(doc)['name'] := 'John';
-In fact, the way late-binding properties are implemented in the {\i FreePascal} RTL forbid to modify the content of the associated {\f1\fs20 variant}. A private copy of the {\f1\fs20 variant} is made, which is not only slower, but disallows modification of its stored value.\line Any feedback and help from the {\i FreePascal} maintainers may be welcome!
-As a result, direct access to {\f1\fs20 TJSONVariantData} instances, and not a {\f1\fs20 variant} variable, will be faster and less error-prone when using this compiler, until the issue is fixed.
-In the Lazarus IDE, we also observed that the debugger is not able to handle our custom {\f1\fs20 variant} type. If you look at any {\f1\fs20 TJSONVariantData} instance with the debugger, an error message "{\i unsupported variant type}" will appear. As far as we found out, this is a Lazarus bug. Delphi, on its side, is able to display any custom {\f1\fs20 variant} type in its debugger, after conversion to {\f1\fs20 string}, i.e. its JSON representation.
+In fact, the way late-binding properties are implemented in the {\i FreePascal} in some fully compatible with {\i Delphi} expectations. The {\i FreePascal} maintainers did some initial fix (the {\f1\fs20 variant} instance is now passed by reference), so above code seems to work on current FPC trunk.
+As a result, direct access to {\f1\fs20 TJSONVariantData} instances, and not a {\f1\fs20 variant} variable, may be both safer and faster when using FPC.
+In the Lazarus IDE, we also observed that the debugger is not able to handle our custom {\f1\fs20 variant} type. If you look at any {\f1\fs20 TJSONVariantData} instance with the debugger, an error message "{\i unsupported variant type}" will appear. As far as we found out, this is a Lazarus limitation. Delphi, on its side, is able to display any custom {\f1\fs20 variant} type in its debugger, after conversion to {\f1\fs20 string}, i.e. its JSON representation.
 Another issue with the 2.7.1 / 3.1.1 revisions is how the new {\f1\fs20 string} type is implemented.\line In fact, if you use a string variable containing an @*UTF-8@ encoded text, then the following line will reset the result code page to the system code page:
 !function StringToJSON(const Text: string): string;
 !  ...
@@ -13374,13 +13386,13 @@ As we already stated, our @35@ allow all these patterns.\line We will now detail
 \page
 :112 Windows and Linux hosted
 The current version of the framework fully supports deploying the {\i mORMot} servers on the {\i @**Windows@} platform, either as a {\i Win32} executable, or - for latest versions of the {\i Delphi} compiler - as a {\i Win64} executable.
-Preliminary {\i @**Linux@} support (via @**FPC@ 2.7.1 / 3.1.1) is available, but we face some FPC compiler-level issue, which does not supply the needed {\f1\fs20 interface} RTTI - see @http://bugs.freepascal.org/view.php?id=26774 - so that the SOA and MVC features are not working directly, but need to generate the RTTI from a Delphi compiler, as stated @125@. For the client side, there is no limitation, thanks to our @86@, which is perfectly supported by the FPC compiler under {\i Linux}. We hope that a {\i Linux} backend will be made available in Delphi, for servers - even if it sadly sounds not like the highest priority of Embarcadero.
+{\i @**Linux@} support (via @**FPC@ 3.1.x) is available, but we face some FPC compiler-level issue with FPC 2.x, which does not supply the needed {\f1\fs20 interface} RTTI - see @http://bugs.freepascal.org/view.php?id=26774 - so that the SOA and MVC features are not working directly non old FPC revision, so you need to generate the RTTI from a Delphi compiler, as stated @125@. For the client side, there is no limitation, thanks to our @86@, which is perfectly supported even by oldest FPC compiler under {\i Linux}. The {\i Linux} backend available in latest Delphi is not supported, since FPC 2.x gives pretty good results (we use it on production since years), and a Delphi Entreprise licence is required to access it - which we don't have.
 In practice, a {\i mORMot} server expects much lower hardware requirements (in CPU, storage and RAM terms) than a regular {\f1\fs20 IIS-WCF-MSSQL-.Net} stack. And it requires almost no maintenance.
 As a consequence, the potential implementation schemes could be hosted as such:
 - Stand-alone application, without any explicit server;
 - Self-hosted service running on the corporate file server, or on a small dedicated VM or recycled computer (for best performance, just put your data on a new SSD on the old hardware PC);
 - @*Cloud@ services running {\i Windows Server}, with minimal configuration: {\f1\fs20 IIS}, {\f1\fs20 .Net} or {\f1\fs20 MS SQL} are not necessary at all - a cheap virtual system with 512 MB of memory is enough to run your {\i mORMot} service and serve hundredths of clients;
-- {\i Linux} servers, with no dependency (even latest version of {\i SQlite3} is statically linked to the executables), using even less hardware resource - but remember that this platform is very new to the framework.
+- {\i Linux} servers, with no dependency (even latest version of {\i SQlite3} is statically linked to the executables), using less hardware resource.
 In the cloud, since every resource used is monitored and billed, you would like to minimize RAM use: you should better take a look at @http://www.delphitools.info/2013/11/20/moving-hosts-now-settled and @http://www.delphitools.info/2013/11/29/flush-windows-file-cache for practical advices and feedbacks.
 About the edition of {\i Windows} to be used, of course IT people will ensure you that {\i Windows Server} is mandatory. But from our tests, you will obtain pretty good results, even with a regular Windows 7 or 8 version of the operating system. On the other side, it is not serious to envisage hosting a server on Windows XP, which is not supported any more by Microsoft - even if technically a {\i mORMot} server will work very well on this deprecated platform.
 Of course, if you use @27@, the hardware and hosting expectations may vary. It will depend on the database back-end used, and will necessarily be much more demanding than our internal {\i SQLite3} database engine. In practice, a {\i mORMot} server using a {\i SQLite3} engine running on a SSD hardware, in {\f1\fs20 lmExclusive} mode - see @60@ - runs faster than most @*SQL@ or @*NoSQL@ engines available, since it will be hosted within the {\i mORMot} server process itself - see @4@.
@@ -13969,7 +13981,7 @@ Of course, you can use so-called {\i Promises} and some nice libraries - mainly 
 #      console.error("Error with the twitterverse:", error);
 #    }
 #  );
-Taken from @http://domenic.me/2012/10/14/youre-missing-the-point-of-promises
+Taken from @https://blog.domenic.me/youre-missing-the-point-of-promises/
 This kind of code will be perfectly readable for a {\i JavaScript} daily user, or someone fluent with functional languages.
 But the following blocking/synchronous code may sound much more familiar, safer and less verbose, to most {\i Delphi} / Java / C# programmer:
 #try {
@@ -15838,7 +15850,7 @@ Before any release all unitary regression tests are performed with the following
 - {\i Delphi} 10.2 Tokyo;
 - {\i Delphi} 10.3 Rio;
 - {\i @*CrossKylix@} 3.0;
-- {\i @*FPC@} 3.x.x / 3.1.1 (svn revision).
+- {\i @*FPC@} 3.1.x (svn revision).
 Target platforms are {\i Win32} and {\i Win64} for {\i Delphi} and {\i FPC}, plus {\i Linux 32/64} for {\i FPC} and {\i CrossKylix}.
 Then all sample source code (including the {\i Main Demo} and {\f1\fs20 @*SynDBExplorer@} sophisticated tools) are compiled, and user-level testing is performed against those applications.
 You can find in the {\f1\fs20 compil.bat} and {\f1\fs20 compilpil.bat} files of our source code repository how incremental builds and tests are performed.
@@ -16204,24 +16216,24 @@ Follow these steps:
 - Finally, click on the "{\i Zip Archive}" link, available at the end of the "{\i Overview}" header, right ahead to the "{\i Other Links}" title. This link will build a {\f1\fs20 .zip} archive of the complete source code and download it to your browser.
 :  Expected compilation platform
 The framework source code tree will compile and is tested for the following platforms:
-- {\i Delphi} 6 up to {\i Delphi 10.3 Rio} compiler and IDE, with @*FPC@ 2.7.1 / 3.1.1 support;
-- Server side on Windows 32-bit and @**64-bit@ platforms ({\i Delphi} XE2 and up is expected when targeting {\i Win64});
-- Preliminary {\i @*Linux@} platform for @*ORM@ servers using the FPC compiler - less stable and tested in production than the Windows port;
+- {\i Delphi} 6 up to {\i Delphi 10.3 Rio} compiler and IDE, with {\i @*FreePascal@ Compiler} (FPC) 3.1.x and {\i @*Lazarus@} support;
+- Server side on Windows 32-bit and @**64-bit@ platforms (FPC or {\i Delphi} XE2 and up expected when targeting {\i Win64});
+- {\i @*Linux@} 32-bit and 64-bit platform for servers using the FPC 3.1.x compiler - now stable and tested in production since years (especially {\i @*Debian@/@*Ubuntu@} on {\f1\fs20 x86_64});
 - VCL client on Win32/Win64 - GUI may be compiled optionally with third-party non Open-Source @*TMS@ Components, instead of default VCL components - see @http://www.tmssoftware.com/site/tmspack.asp
 - @69@ clients on any supported platforms;
-- @90@ startup with 2.1, for creating AJAX / HTML5 / Mobile clients.
+- @90@ startup with 2.1, for creating @*AJAX@ / @*JavaScript@ / HTML5 / Mobile clients.
 Some part of the library (e.g. {\f1\fs20 SynCommons.pas}, {\f1\fs20 SynTests.pas}, {\f1\fs20 SynLog.pas} {\f1\fs20 SynPDF.pas} or the @27@ units) are also compatible with {\i Delphi} 5.
 If you want to compile {\i mORMot} unit into @*packages@, to avoid an obfuscated {\i [DCC Error] @*E2201@ Need imported data reference ($G) to access 'VarCopyProc'} error at compilation, you should defined the {\f1\fs20 USEPACKAGES} conditional in your project's options. Open {\f1\fs20 SynCommons.inc} for a description of this conditional, and all over definitions global to all {\i mORMot} units - see @45@.
-Note that the framework is expected to create only Windows server applications yet.\line But @86@ are available, using either {\i @*FireMonkey@} (FMX) library for User Interface generation, {\i @*FreePascal@ Compiler} (FPC) / {\i @*Lazarus@} support, or other tools more neutral, using @*JavaScript@ and @*AJAX@ via {\i @*Smart Mobile Studio@} - or both. The framework source code implementation and design tried to be as cross-platform as possible, since the beginning.
+The framework source code implementation and design tried to be as cross-platform and cross-compiler as possible, since the beginning. It is a lot of work to maintain compatibility towards so many tools and platforms, but we think it is always worth it - especially if you try not depend on {\i Delphi} only, which as shown some backward compatibility issues during its lifetime.
 For HTML5 and Mobile clients, our main platform is {\i Smart Mobile Studio}, which is a great combination of ease of use, a powerful {\i SmartPascal} dialect, small applications (much smaller than FMX), with potential packaging as native iOS or {\i Android} applications (via {\i @*PhoneGap@}).
-The latest versions of the {\i FreePascal Compiler} together with its great {\i Lazarus} IDE, are now very stable and easy to work with. I've tried for instance the {\i CodeTyphon} release (which is not the stable branch, but the latest version of both FPC and {\i Lazarus}) - see @http://www.pilotlogic.com - and found it to be impressive. This is amazing to build the whole set of compilers and IDE, with a lot of components, for several platforms (this is a cross-platform project), just from the sources. I like {\i Lazarus} stability and speed much more than {\i Delphi} (did you ever tried to browse and debug {\i included} {\f1\fs20 $I ...} files in the {\i Delphi} IDE? with Lazarus, it is painless), even if the compiler is slower than {\i Delphi}'s, and if the debugger is less integrated and even more unstable than {\i Delphi}'s under Windows (yes, it is possible!). At least, it works, and works pretty well. Official {\i @*Linux@} / {\i FPC} support is available for {\i mORMot} servers - thanks to Alfred! - but this platform is brand new to the framework, so less stable and not yet feature complete.
+The latest versions of the {\i FreePascal Compiler} together with its great {\i Lazarus} IDE, are now very stable and easy to work with. We don't support {\i CodeTyphon}, since we found some licensing issue with some part of it (e.g. {\i Orca} GUI library origin is doubtful). So we recommend using {\i @*fpcupdeluxe@} - see @203@ - which is maintained by Alfred, a {\i mORMot} contributor. This is amazing to build the whole set of compilers and IDE, with a lot of components, for several platforms (this is a cross-platform project), just from the sources. I like {\i Lazarus} stability and speed much more than {\i Delphi} (did you ever tried to browse and debug {\i included} {\f1\fs20 $I ...} files in the {\i Delphi} IDE? with Lazarus, it is painless), even if the compiler is slower than {\i Delphi}'s, and if the debugger is less integrated and even more unstable than {\i Delphi}'s under Windows (yes, it is possible!). At least, it works, and the {\i Lazarus} IDE is small and efficient. Official {\i @*Linux@} support is available for {\i mORMot} servers, with full features in the {\i FPC} 3.1.x branch - we use it on producing on {\i Linux} 64-bit since years.
 :  32-bit sqlite3*.obj and 64-bit SQLite3 dll
 In order to maintain the source code repository in a decent size, we excluded the {\f1\fs20 sqlite3*.obj} storage in it, but provide the full source code of the {\i @*SQlite3@} engine in the corresponding {\f1\fs20 sqlite3.c} file, ready to be compiled with all conditional defined as expected by {\f1\fs20 SynSQlite3Static.pas}.
-Therefore, {\f1\fs20 sqlite3.obj} and {\f1\fs20 sqlite3fts.obj} files are available as a separated download, from @https://synopse.info/files/sqlite3obj.7z
+Therefore, {\f1\fs20 sqlite3.obj} and {\f1\fs20 sqlite3fts.obj} files are available for {\i Delphi}, as a separated download, from @https://synopse.info/files/sqlite3obj.7z
 Please download the latest compiled version of these {\f1\fs20 .obj} files from this link. You can also use the supplied {\f1\fs20 c.bat} file to compile from the original {\f1\fs20 sqlite3.c} file available in the repository, if you have the {\f1\fs20 bcc32} C command-line compiler installed.
 The free version works and was used to create both {\f1\fs20 .obj} files, i.e. {\i C++Builder Compiler (bcc compiler) free download} - as available from {\i Embarcadero} web site.
 For native {\i Windows} @*64-bit@ applications (since {\i Delphi} XE2), an external {\f1\fs20 .dll} file is needed. Since there is no official {\i SQLite3} download for {\i Win64} yet, you can use the one we supply at @https://synopse.info/files/SQLite3-64.7z
-For FPC, you need to download static {\f1\fs20 .o} files from @https://synopse.info/files/sqlite3fpc.7z then uncompress the embedded {\f1\fs20 static} folder and its sub-folders at the {\i mORMot} root folder (i.e. where {\f1\fs20 Synopse.inc} and {\f1\fs20 SynCommons.pas} stay). Those {\f1\fs20 static} files have been patched to support optional encryption of the {\i SQLite3} database file. Then enable the {\f1\fs20 FPCSQLITE3STATIC} conditional in your project, or directly modify {\f1\fs20 Synopse.inc} to include it, so that those {\f1\fs20 .o} files will be statically linked to the executable.
+For FPC, you need to download static {\f1\fs20 .o} files from @https://synopse.info/files/sqlite3fpc.7z then uncompress the embedded {\f1\fs20 static} folder and its sub-folders at the {\i mORMot} root folder (i.e. where {\f1\fs20 Synopse.inc} and {\f1\fs20 SynCommons.pas} stay). If you retrieved the source code from our @*GitHub@ repository at @https://github.com/synopse/mORMot you already got the {\f1\fs20 static} sub-folder as expected by the framework. Those {\f1\fs20 static} files have been patched to support optional encryption of the {\i SQLite3} database file. Then enable the {\f1\fs20 FPCSQLITE3STATIC} conditional in your project, or directly modify {\f1\fs20 Synopse.inc} to include it, so that those {\f1\fs20 .o} files will be statically linked to the executable.
 You could also compile the static libraries from the {\f1\fs20 sqlite3.c} source, to run with FPC - do not forget to enable the {\f1\fs20 FPCSQLITE3STATIC} conditional in this case also.\line Under {\i Windows}, ensure the {\i MinGW} compiler is installed, then execute {\f1\fs20 c-fpcmingw.bat} from the {\i SQLite3} folder. It will create the {\f1\fs20 sqlite3.o} and {\f1\fs20 sqlite3fts.o} files, as expected by FPC.\line Under {\i @*Linux@}, Use the {\f1\fs20 c-fpcgcclin.sh} bash script.
 :  SpiderMonkey library
 To enable {\i @*JavaScript@} support in {\i mORmot}, we rely on our version of the {\i @*SpiderMonkey@} library. See @79@.
@@ -16354,7 +16366,7 @@ See @86@ for more information.
 \page
 :113 Delphi Installation
 {\i Note: for FPC setup, see @125@.}
-To setup mORMot for {\i Delphi 6} up to {\i Delphi 10.3 Rio}, you have two ways: either download the framework from archives, or clone our {\i GitHub} repository.
+To setup mORMot for {\i Delphi 6} up to {\i Delphi 10.3 Rio}, you have two ways: either download the framework from archives, or clone our {\i GitHub} repository at @https://github.com/synopse/mORMot
 :  Manual download
 Download and uncompress the framework archives, including all sub-folders, into a local directory of your computer (for instance, {\f1\fs20 D:\\Dev\\mORMot}).
 |%70
@@ -16365,11 +16377,11 @@ Download and uncompress the framework archives, including all sub-folders, into 
 |{\b for FPC only: static {\f1\fs20 .o} files for Windows or Linux/BSD}\line\tab @https://synopse.info/files/sqlite3fpc.7z \line\tab whole {\f1\fs20 static} folder into {\f1\fs20 D:\\Dev\\mORMot\\}
 |%
 :  Get from GitHub
-Or you may just clone our {\i @**GitHub@} repository, from @https://github.com/synopse/mORMot :
+Or you may just clone our {\i @**GitHub@} repository, from @https://github.com/synopse/mORMot e.g. via:
 $ d:
 $ cd Dev
 $ git clone https://github.com/synopse/mORMot.git
-It will create a {\f1\fs20 D:\\Dev\\mORMot} local folder, which will eventually be re-synchronized with the official sources. Advantage of cloning our {\i GitHub} repository is that it contains binaries for static linking, ({\i SQLite3} and @*FPC@ specific), in a single step.
+It will create a {\f1\fs20 d:\\Dev\\mORMot} local folder, which will eventually be re-synchronized with the official sources. Advantage of cloning our {\i GitHub} repository is that it contains binaries for static linking, ({\i SQLite3} and @*FPC@ specific), in a single step.
 Just take care that if you downloaded some other library from Synopse (e.g. from @https://github.com/synopse/SynPDF or @https://github.com/synopse/dmustache), you should better use the main @https://github.com/synopse/mORMot only, which contains other projects, to avoid any version confusion. We have seen a lot of installation problems reported in our forum due to source code file collision from several repositories, not in the same revision.
 :  Setup the Delphi IDE
 To let your IDE know about {\i mORMot} source code, add the following paths to your {\i Delphi} IDE (in {\i Tools/Environment/Library} or {\i Tools/Options/Language/Delphi Options/Library} menu depending on your Delphi version):
@@ -16406,7 +16418,7 @@ Replace {\f1\fs20 D:\\Dev\\mORMot} path by the absolute/relative folder where yo
 You could use a recent SVN trunk version of the FPC 2.7.1 / 3.1.1 compiler, and the corresponding {\i Lazarus} IDE.
 If you want to use @80@, ensure that your revision includes the fix for @http://mantis.freepascal.org/view.php?id=26773 bug, i.e. newer than revision 28995 from 2014-11-05T22:17:54. This bug was not fixed in 2.6.4 branch, but any newer 3.x revision should be enough.
 But since the FPC trunk may be unstable, we will propose to put in place a stable development environment to work with your {\i mORMot}-based projects. It may ease support and debugging.
-For this task, don't download an existing binary release of FPC / Lazarus, but use the {\i @*fpcupdeluxe@} tool, as published at @http://wiki.freepascal.org/fpcupdeluxe - it will allow to build your environment directly from the sources, and install it in a dedicated folder. Several FPC / Lazarus installations, with dedicated revision numbers, may coexist on the same computer: just ensure you run Lazarus from the shortcut created by {\i fpcupdeluxe}.
+For this task, don't download an existing binary release of FPC / Lazarus, but use the {\i @**fpcupdeluxe@} tool, as published at @http://wiki.freepascal.org/fpcupdeluxe - it will allow to build your environment directly from the sources, and install it in a dedicated folder. Several FPC / Lazarus installations, with dedicated revision numbers, may coexist on the same computer: just ensure you run Lazarus from the shortcut created by {\i fpcupdeluxe}.
 Download the latest release of the tool from @https://github.com/LongDirtyAnimAlf/fpcupdeluxe/releases \line Unpack it in a dedicated folder, and run its executable.\line Click on the {\i "Setup +"} button, and enter the following revision numbers:
 - FPC trunk SVN {\f1\fs20 40491};
 - Lazarus trunk SVN {\f1\fs20 59757}.
@@ -16490,7 +16502,7 @@ Here are a few informal notes about getting running a FPC/Lazarus virtual machin
 - Start the VM and install {\i Linux} locally, as usual - you may select to download the updated packages during the installation, for safety;
 - When the system restarts, if it asks for software updates, accept and wait for the update installation to finish - it is a good idea to have the latest version of the kernel and libraries before installing the {\i VirtualBox} drivers;
 - Restart your VM when asked to;
-- Under a Ubuntu/Debian terminal, write the following commands:
+- Under a {\i @*Ubuntu@/@*Debian@} terminal, write the following commands:
 $ sudo apt-get update
 $ sudo apt-get upgrade
 $ sudo apt-get install dkms
@@ -16527,8 +16539,8 @@ We added {\i CrossKylix} support for several reasons:
 - Resulting executables, for {\i mORMot} purpose, are faster than FPC - timing based on the regression tests.
 - If the code works with Delphi 7, it will certainly work with {\i Kylix} (since it shares the same compiler and RTL), whereas FPC is compatible, but not the same. In particular, it does not suffer from limited RTTI or other FPC limitations. So it sounds safer to be used on production than FPC, even today.
 - There is not a lot of {\f1\fs20 IFDEF}, but in {\f1\fs20 SynCommons.pas}. Then there is a {\f1\fs20 SynKylix.pas} unit for several functions. User code will be the same than Delphi and FPC.
-- There is a {\i Linux} compiler in the official {\i Embarcadero} product roadmap, but sounds like if it may be ARC-enabled, so we may have to sadly skip its support, and focus on Kylix and FPC...
-Currently, we use FPC with success for building {\f1\fs20 i386} and {\f1\fs20 x86_64} executables. FPC is therefore recommended for production work targeting {\i Linux}. See @125@.
+- There is a {\i Linux} compiler just released by {\i Embarcadero} since latest Delphi, but an {\i Entreprise} license is required, so we currently skip its support, and focus on FPC...
+Currently, we use FPC with success for building {\f1\fs20 i386} and {\f1\fs20 x86_64} executables. FPC is therefore recommended for production work targeting {\i Linux}. See @125@ and @203@.
 Once you have installed {\i CrossKylix}, and set up its search path to the same as Delphi - see @113@, you should be able to compile your project for {\i Linux}, directly from your {\i Delphi} IDE. Then you need an actual {\i Linux} system to test it - please check the @142@.
 A minimal console application which will compile for both {\i Delphi} and {\i CrossKylix}, running all our regression tests, may be:
 !program Test;

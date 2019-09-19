@@ -176,12 +176,12 @@ var
 /// compatibility function, to be implemented according to the running OS
 // - expect more or less the same result as the homonymous Win32 API function
 // - will call clock_gettime(CLOCK_MONOTONIC_COARSE) if available
-function GetTickCount64: Int64; inline;
+function GetTickCount64: Int64;
 
 /// compatibility function, to be implemented according to the running OS
 // - expect more or less the same result as the homonymous Win32 API function
 // - will call clock_gettime(CLOCK_MONOTONIC_COARSE) if available
-function GetTickCount: cardinal; inline;
+function GetTickCount: cardinal;
 
 var
   /// could be set to TRUE to force SleepHiRes(0) to call the sched_yield API
@@ -192,7 +192,10 @@ var
 // another pending thread, i.e. ThreadSwitch on Windows (sched_yield API is
 // not called on LINUX/POSIX since it was reported to fail on some systems -
 // you can force SleepHiRes0Yield=true to change this behavior)
-procedure SleepHiRes(ms: cardinal); inline;
+procedure SleepHiRes(ms: cardinal);
+
+/// check if any char is pending from StdInputHandle file descriptor
+function UnixKeyPending: boolean;
 
 
 implementation
@@ -221,6 +224,15 @@ begin
   if cs.__m_kind<>0 then
   {$endif LINUXNOTBSD}
     DoneCriticalSection(cs);
+end;
+
+function UnixKeyPending: boolean;
+var
+  fdsin: tfdSet;
+begin
+  fpFD_ZERO(fdsin);
+  fpFD_SET(StdInputHandle,fdsin);
+  result := fpSelect(StdInputHandle+1,@fdsin,nil,nil,0)>0;
 end;
 
 {$ifdef LINUX}

@@ -3900,7 +3900,7 @@ begin
     Counter.b2 := count shr 8;
     Counter.b3 := count;
     LastCounter := count;
-    UnixCreateTime := {$ifdef FPC}SwapEndian{$else}bswap32{$endif}(LastCreateTime);
+    UnixCreateTime := {$ifdef CPUINTEL}bswap32{$else}SwapEndian{$endif}(LastCreateTime);
     MachineID := Default.MachineID;
     ProcessID := Default.ProcessID;
     LeaveCriticalSection(Section);
@@ -3920,7 +3920,7 @@ end;
 
 function TBSONObjectID.CreateDateTime: TDateTime;
 begin
-  result := UnixTimeToDateTime({$ifdef FPC}SwapEndian{$else}bswap32{$endif}(UnixCreateTime));
+  result := UnixTimeToDateTime(bswap32(UnixCreateTime));
 end;
 
 function TBSONObjectID.ToText: RawUTF8;
@@ -5847,7 +5847,7 @@ begin // caller should have made fConnections[0].Open
     resp.Clear;
     CheckPayload;
     if (err='') and (resp.U['v']<>BinToBase64(@server,SizeOf(server))) then
-        err := 'Server returned an invalid signature';
+      err := 'Server returned an invalid signature';
     if err<>'' then
       raise EMongoException.CreateUTF8('%.OpenAuthSCRAM("%") step2: % - res=%',
         [self,DatabaseName,err,res]);
@@ -6892,14 +6892,15 @@ begin
   signlo := 0;
   if signdig<>0 then // if not zero
     if diglast-digfirst<17 then
-      for i := digfirst to diglast do
       {$ifdef CPU32DELPHI} // use "shl" under x86 to avoid slower "call _llmul"
+      for i := digfirst to diglast do
         inc(signlo,signlo+signlo shl 3+digits[i]) else begin
       for i := digfirst to diglast-17 do
         inc(signhi,signhi+signhi shl 3+digits[i]);
       for i := diglast-16 to diglast do
         inc(signlo,signlo+signlo shl 3+digits[i]);
       {$else}
+      for i := digfirst to diglast do
         signlo := signlo*10+digits[i] else begin
       for i := digfirst to diglast-17 do
         signhi := signhi*10+digits[i];

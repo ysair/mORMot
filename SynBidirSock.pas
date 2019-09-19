@@ -2057,17 +2057,19 @@ end;
 function TWebSocketProtocolBinary.GetFramesInCompression: integer;
 begin
   if (self=nil) or (fFramesInBytes=0) then
-    result := 0 else
-    result := (fFramesInBytesSocket*100) div fFramesInBytes;
-  result := 100-result;
+    result := 100 else
+    if not fCompressed or (fFramesInBytesSocket<fFramesInBytes) then
+      result := 0 else
+      result := 100-(fFramesInBytesSocket*100) div fFramesInBytes;
 end;
 
 function TWebSocketProtocolBinary.GetFramesOutCompression: integer;
 begin
   if (self=nil) or (fFramesOutBytes=0) then
-    result := 0 else
-    result := (fFramesOutBytesSocket*100) div fFramesOutBytes;
-  result := 100-result;
+    result := 100 else
+    if not fCompressed or (fFramesOutBytesSocket<=fFramesOutBytes) then
+      result := 0 else
+      result := 100-(fFramesOutBytesSocket*100) div fFramesOutBytes;
 end;
 
 function TWebSocketProtocolBinary.ProcessHandshake(const ExtIn: TRawUTF8DynArray;
@@ -2551,7 +2553,7 @@ var hdr: TFrameHeader;
       fSocket.SockInRead(@hdr.len32,8,false);
       if hdr.len32<>0 then // size is more than 32 bits -> reject
         hdr.len32 := maxInt else
-        hdr.len32 := {$ifdef FPC}SwapEndian{$else}bswap32{$endif}(hdr.len64);
+        hdr.len32 := bswap32(hdr.len64);
       if hdr.len32>WebSocketsMaxFrameMB shl 20 then
         raise EWebSockets.CreateUTF8('%.GetFrame: length should be < % MB',
           [self,WebSocketsMaxFrameMB]);
@@ -2647,7 +2649,7 @@ begin
         fSocket.SockSend(@hdr,4);
       end else begin
         hdr.len8 := FRAME_LEN8BYTES or fMaskSentFrames;
-        hdr.len64 := {$ifdef FPC}SwapEndian{$else}bswap32{$endif}(len);
+        hdr.len64 := bswap32(len);
         hdr.len32 := 0;
         // huge payload sent outside TCrtSock buffers
         if not fSocket.TrySndLow(@hdr,10+fMaskSentFrames shr 5) or
