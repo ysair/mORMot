@@ -52,7 +52,7 @@ unit mORMotMVC;
 
 }
 
-{$I Synopse.inc} // define HASINLINE USETYPEINFO CPU32 CPU64 OWNNORMTOUPPER
+{$I Synopse.inc} // define HASINLINE CPU32 CPU64 OWNNORMTOUPPER
 
 interface
 
@@ -634,8 +634,8 @@ type
     /// to be called when the data model did change to force content re-creation
     // - this default implementation will call fMainRunner.NotifyContentChanged
     procedure FlushAnyCache; virtual;
-    /// generic IMVCApplication implementation
-    procedure Error(var Msg: RawUTF8; var Scope: variant);
+    /// generic IMVCApplication.Error method implementation
+    procedure Error(var Msg: RawUTF8; var Scope: variant); virtual;
     /// every view will have this data context transmitted as "main":...
     function GetViewInfo(MethodIndex: integer): variant; virtual;
     /// compute the data context e.g. for the /mvc-info URI

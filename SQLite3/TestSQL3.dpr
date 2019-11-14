@@ -85,7 +85,7 @@ program TestSQL3;
   {$endif}
 {$endif}
 
-{$I Synopse.inc} // define HASINLINE USETYPEINFO CPU32 CPU64 USELIBCURL
+{$I Synopse.inc} // define HASINLINE CPU32 CPU64 USELIBCURL
 
 {.$define ForceFastMM4}
 // for debug/tests purposes
@@ -95,7 +95,7 @@ program TestSQL3;
 {$endif}
 
 uses
-  {$ifdef KYLIX3} // strip down to the minimum files including /
+  {$ifdef KYLIX3} // strip down to the minimum files needed
     FastMM4,
     ECCProcess in 'Samples/33 - ECC/ECCProcess.pas',
     mORMotSelfTests;
@@ -116,7 +116,7 @@ uses
     SynCrtSock in '..\SynCrtSock.pas',
     SynBidirSock in '..\SynBiDirSock.pas',
     {$ifdef USELIBCURL}
-      SynCurl,
+      SynCurl in '..\SynCurl.pas',
     {$endif USELIBCURL}
     //SynOpenSSL,
     SynCommons in '..\SynCommons.pas',
@@ -131,6 +131,7 @@ uses
           mORMotMVC in 'mORMotMVC.pas',
           mORMotDDD in 'mORMotDDD.pas',
           dddDomAuthInterfaces in 'DDD\dom\dddDomAuthInterfaces.pas',
+          dddDomCountry in 'DDD\dom\dddDomCountry.pas',
           dddDomUserTypes in 'DDD\dom\dddDomUserTypes.pas',
           dddDomUserInterfaces in 'DDD\dom\dddDomUserInterfaces.pas',
           dddDomUserCQRS in 'DDD\dom\dddDomUserCQRS.pas',
@@ -175,8 +176,8 @@ uses
       {$endif FPC}
       SynDB in '..\SynDB.pas',
       SynDBSQLite3 in '..\SynDBSQLite3.pas',
+      SynDBOracle in '..\SynDBOracle.pas',
       {$ifdef MSWINDOWS}
-        SynDBOracle in '..\SynDBOracle.pas',
         SynOleDB in '..\SynOleDB.pas',
         SynDBODBC in '..\SynDBODBC.pas',
         {$ifdef USEZEOS}
@@ -196,7 +197,7 @@ uses
   {$endif KYLIX3}
 
 {$ifdef MSWINDOWS}
-  {$R ..\Vista.res} // includes manifest to identify Windows 10 OS
+  {$R ..\vista.RES} // includes Win10 manifest - use .RES for linux cross-compilation
 {$endif}
 
 begin
