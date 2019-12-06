@@ -18196,6 +18196,7 @@ type
     fStoredClass: TSQLRecordClass;
     fStoredClassProps: TSQLModelRecordProperties;
     fStoredClassRecordProps: TSQLRecordProperties;
+    fStoredClassMapping: PSQLRecordPropertiesMapping;
     fStorageLockShouldIncreaseOwnerInternalState: boolean;
     fStorageLockLogTrace: boolean;
     fModified: boolean;
@@ -20913,7 +20914,7 @@ function CurrentServiceContextServer: TSQLRestServer;
 
 /// returns a safe 256-bit hexadecimal nonce, changing every 5 minutes
 // - as used e.g. by TSQLRestServerAuthenticationDefault.Auth
-// - this function is very fast, even if cryptographically-level secure
+// - this function is very fast, even if cryptographically-level SHA-3 secure
 function CurrentServerNonce(Previous: boolean=false): RawUTF8;
 
 function ToText(ft: TSQLFieldType): PShortString; overload;
@@ -21491,6 +21492,7 @@ function ClassFieldNamesAllProps(ClassType: TClass; IncludePropType: boolean;
 var props: PPropInfoDynArray;
     n,i: integer;
 begin
+  result := nil;
   props := ClassFieldAllProps(ClassType,Types);
   n := length(props);
   SetLength(result,n);
@@ -26560,8 +26562,10 @@ begin
   for i := 2 to fRowCount do begin
     {$ifdef FPC}Move{$else}MoveFast{$endif}(U^^,P^,len^);
     inc(P,len^);
-    {$ifdef FPC}Move{$else}MoveFast{$endif}(pointer(Sep)^,P^,SepLen);
-    inc(P,SepLen);
+    if SepLen>0 then begin
+      MoveSmall(pointer(Sep),P,SepLen);
+      inc(P,SepLen);
+    end;
     inc(len);
     inc(U,FieldCount); // go to next row
   end;
@@ -28772,7 +28776,7 @@ begin
       end;
     end;
     else
-      raise EORMException.Create('Invalid EncodeAsSQLPrepared() call');
+      raise EORMException.CreateUTF8('Unexpected EncodeAsSQLPrepared(%)',[ord(Occasion)]);
     end;
     W.SetText(result);
   finally
@@ -30969,6 +30973,7 @@ procedure TEnumType.GetEnumNameAll(var result: TRawUTF8DynArray;
 var max,i: integer;
     V: PShortString;
 begin
+  Finalize(result);
   max := MaxValue-MinValue;
   SetLength(result,max+1);
   V := @NameList;
@@ -34406,6 +34411,7 @@ function TSQLModel.GetTablesFromSQLSelect(const SQL: RawUTF8): TSQLRecordClassDy
 var t: TIntegerDynArray;
     n,i: integer;
 begin
+  result := nil;
   t := GetTableIndexesFromSQLSelect(SQL);
   n := length(t);
   if n=0 then
@@ -46393,7 +46399,7 @@ begin
 end;
 
 function TSQLRestStorageInMemory.EngineList(const SQL: RawUTF8;
-  ForceAJAX: Boolean=false; ReturnedRowCount: PPtrInt=nil): RawUTF8;
+  ForceAJAX: Boolean; ReturnedRowCount: PPtrInt): RawUTF8;
 // - GetJSONValues/FindWhereEqual will handle basic REST commands (not all SQL)
 // only valid SQL command is "SELECT Field1,Field2 FROM Table WHERE ID=120;",
 // i.e one Table SELECT with one optional "WHERE fieldname = value" statement
@@ -47857,6 +47863,7 @@ begin
      fModel.Owner := self;
    end;
   fStoredClassProps := fModel.Props[aClass];
+  fStoredClassMapping := @fStoredClassProps.ExternalDB;
   fIsUnique := fStoredClassRecordProps.IsUniqueFieldsBits;
   fBasicSQLCount := 'SELECT COUNT(*) FROM '+fStoredClassRecordProps.SQLTableName;
   fBasicSQLHasRows[false] := 'SELECT RowID FROM '+fStoredClassRecordProps.SQLTableName+' LIMIT 1';
@@ -50866,7 +50873,7 @@ begin
 end;
 
 function TSQLRecordMany.IDWhereSQL(aClient: TSQLRest; aID: TID; isDest: boolean;
-  const aAndWhereSQL: RawUTF8=''): RawUTF8;
+  const aAndWhereSQL: RawUTF8): RawUTF8;
 const FieldName: array[boolean] of RawUTF8 = ('Source=','Dest=');
 begin
   if (self=nil) or (aID=0) or (fSourceID=nil) or (fDestID=nil) or
@@ -51476,10 +51483,6 @@ end;
 
 function TSQLRecordProperties.SQLAddField(FieldIndex: integer): RawUTF8;
 begin
-  if (self=nil) or (cardinal(FieldIndex)>=cardinal(Fields.Count)) then begin
-    result := '';
-    exit;
-  end;
   result := SQLFieldTypeToSQL(FieldIndex);
   if result='' then
     exit; // some fields won't have any column created in the database
@@ -55254,6 +55257,7 @@ class function TInterfaceFactory.GUID2TypeInfo(
   const aGUIDs: array of TGUID): PTypeInfoDynArray;
 var i: integer;
 begin
+  result := nil;
   SetLength(result,length(aGUIDs));
   for i := 0 to high(aGUIDs) do
     result[i] := GUID2TypeInfo(aGUIDs[i]);
@@ -59149,7 +59153,8 @@ asm
 end;
 {$endif CPUX64}
 
-{$ifdef ISDELPHI7ANDUP}{$WARN COMPARING_SIGNED_UNSIGNED OFF}{$endif} // W1023 FPC_STACKALIGNMENT
+{$ifdef ISDELPHI7ANDUP}{$WARN COMPARING_SIGNED_UNSIGNED OFF}{$endif}
+// disable W1023 FPC_STACKALIGNMENT (not possible on Delphi 6)
 
 {$ifdef CPUX86}
 
@@ -61135,12 +61140,6 @@ end;
 
 { TServiceMethod }
 
-type
-  TDynArrayFake = record
-    Value: Pointer;
-    Wrapper: TDynArray;
-  end;
-
 function TServiceMethod.ArgIndex(ArgName: PUTF8Char; ArgNameLen: integer;
   Input: boolean): integer;
 begin
@@ -61278,6 +61277,7 @@ end;
 function TServiceMethod.ArgsNames(Input: Boolean): TRawUTF8DynArray;
 var a,n: integer;
 begin
+  result := nil;
   if Input then begin
     SetLength(result,ArgsInputValuesCount);
     n := 0;
@@ -61304,10 +61304,12 @@ procedure TServiceMethod.ArgsStackAsDocVariant(const Values: TPPointerDynArray;
 var a: integer;
 begin
   if Input then begin
+    Dest.InitFast(ArgsInputValuesCount,dvObject);
     for a := ArgsInFirst to ArgsInLast do
       if Args[a].ValueDirection in [smdConst,smdVar] then
         Args[a].AddAsVariant(Dest,Values[a]);
   end else begin
+    Dest.InitFast(ArgsOutputValuesCount,dvObject);
     for a := ArgsOutFirst to ArgsOutLast do
       if Args[a].ValueDirection in [smdVar,smdOut,smdResult] then
         Args[a].AddAsVariant(Dest,Values[a]);

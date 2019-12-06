@@ -4335,10 +4335,11 @@ procedure TTestLowLevelCommon._UTF8;
     Check(C.RawUnicodeToAnsi(C.AnsiToRawUnicode(W))=W);
     {$endif}
   end;
-var i, len, CP, L: integer;
+var i, j, k, len, lenup100, CP, L: integer;
     W: WinAnsiString;
     WS: WideString;
     SU: SynUnicode;
+    str: string;
     U, res, Up,Up2: RawUTF8;
     arr: TRawUTF8DynArray;
     PB: PByte;
@@ -4444,6 +4445,28 @@ begin
     len := i*5;
     W := RandomAnsi7(len);
     Check(length(W)=len);
+    str := Ansi7ToString(W); // should be fine on any code page
+    if len>0 then begin
+      Check(length(str)=len);
+      check(PosExString(str[1],str)=1);
+      if str[1]<>str[2] then begin
+        check(PosExString(str[2],str)=2);
+        if (str[1]<>str[2]) and (str[2]<>str[3]) and (str[1]<>str[3]) then
+          check(PosExString(str[3],str)=3);
+      end;
+      lenup100 := len;
+      if lenup100>100 then
+        lenup100 := 100;
+      for j := 1 to lenup100 do begin
+        check(PosExString(#13,str,j)=0);
+        check(PosExString(str[j],str,j)=j);
+        if (j>1) and (str[j-1]<>str[j]) then
+          check(PosExString(str[j],str,j-1)=j);
+        k := PosExString(str[j],str);
+        check((k>0) and (str[k]=str[j]));
+      end;
+    end else
+      check(PosExString(#0,str)=0);
     for CP := 1250 to 1258 do
       Test(CP,W);
     Test(932,W);
@@ -4456,6 +4479,22 @@ begin
     Test(CP_UTF16,W);
     W := WinAnsiString(RandomString(len));
     U := WinAnsiToUtf8(W);
+    if len>0 then begin
+      check(PosEx(U[1],U)=1);
+      if (len>1) and (U[1]<>U[2]) then begin
+        check(PosEx(U[2],U)=2);
+        if (len>2) and (U[1]<>U[2]) and (U[2]<>U[3]) and (U[1]<>U[3]) then
+          check(PosEx(U[3],U)=3);
+      end;
+    end;
+    for j := 1 to lenup100 do begin // validates with offset parameter
+      check(PosEx(#13,U,j)=0);
+      check(PosEx(U[j],U,j)=j);
+      if (j>1) and (U[j-1]<>U[j]) then
+        check(PosEx(U[j],U,j-1)=j);
+      k := PosEx(U[j],U);
+      check((k>0) and (U[k]=U[j]));
+    end;
     Unic := Utf8DecodeToRawUnicode(U);
     {$ifndef FPC_HAS_CPSTRING} // buggy FPC
     Check(Utf8ToWinAnsi(U)=W);
@@ -11289,13 +11328,22 @@ procedure TTestCryptographicRoutines._TAESPNRG;
 var b1,b2: TAESBlock;
     a1,a2: TAESPRNG;
     s1,s2,split: RawByteString;
+    c: cardinal;
     d: double;
+    e: TSynExtended;
     i,stripes: integer;
+    clo, chi, dlo, dhi, elo, ehi: integer;
 begin
   TAESPRNG.Main.FillRandom(b1);
   TAESPRNG.Main.FillRandom(b2);
   Check(not IsEqual(b1,b2));
   Check(not CompareMem(@b1,@b2,sizeof(b1)));
+  clo := 0;
+  chi := 0;
+  dlo := 0;
+  dhi := 0;
+  elo := 0;
+  ehi := 0;
   a1 := TAESPRNG.Create;
   a2 := TAESPRNG.Create;
   try
@@ -11318,18 +11366,44 @@ begin
       s1 := a1.FillRandomHex(i);
       check(length(s1)=i*2);
       check(SynCommons.HexToBin(pointer(s1),nil,i));
-      check(a1.Random32<>a2.Random32);
+      c := a1.Random32;
+      check(c<>a2.Random32,'Random32 collision');
+      if c<cardinal(maxint) then
+        inc(clo) else
+        inc(chi);
       check(a1.Random64<>a2.Random64);
       check(a1.Random32(i)<cardinal(i));
-      d := a1.RandomExt;
+      d := a1.RandomDouble;
       check((d>=0)and(d<1));
-      d := a2.RandomExt;
+      if d<0.5 then
+        inc(dlo) else
+        inc(dhi);
+      d := a2.RandomDouble;
       check((d>=0)and(d<1));
+      if d<0.5 then
+        inc(dlo) else
+        inc(dhi);
+      e := a1.Randomext;
+      check((e>=0)and(e<1));
+      if e<0.5 then
+        inc(elo) else
+        inc(ehi);
+      e := a2.Randomext;
+      check((e>=0)and(e<1));
+      if e<0.5 then
+        inc(elo) else
+        inc(ehi);
     end;
   finally
     a1.Free;
     a2.Free;
   end;
+  Check(clo+chi=2000);
+  Check(dlo+dhi=4000);
+  Check(elo+ehi=4000);
+  CheckUTF8((clo>=950) and (clo<=1050),'Random32 distribution clo=%',[clo]);
+  CheckUTF8((dlo>=1900) and (dlo<=2100),'RandomDouble distribution dlo=%',[dlo]);
+  CheckUTF8((elo>=1900) and (elo<=2100),'RandomExt distribution elo=%',[elo]);
   s1 := TAESPRNG.Main.FillRandom(100);
   for i := 1 to length(s1) do
     for stripes := 0 to 10 do begin

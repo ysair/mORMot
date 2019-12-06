@@ -820,7 +820,7 @@ type
     /// finalize the temporary storage
     procedure Done; overload; {$ifdef HASINLINE}inline;{$endif}
     /// finalize the temporary storage, and create a RawUTF8 string from it
-    procedure Done(EndBuf: pointer; var Dest: RawUTF8); overload; {$ifdef HASINLINE}inline;{$endif}
+    procedure Done(EndBuf: pointer; var Dest: RawUTF8); overload;
   private
     // default 4KB buffer allocated on stack
     tmp: array[0..4095] of AnsiChar;
@@ -1022,15 +1022,15 @@ function IsAnsiCompatible(PC: PAnsiChar): boolean; overload;
 /// return TRUE if the supplied buffer only contains 7-bits Ansi characters
 function IsAnsiCompatible(PC: PAnsiChar; Len: integer): boolean; overload;
 
-/// return TRUE if the supplied buffer only contains 7-bits Ansi characters
-function IsAnsiCompatible(PW: PWideChar): boolean; overload;
+/// return TRUE if the supplied UTF-16 buffer only contains 7-bits Ansi characters
+function IsAnsiCompatibleW(PW: PWideChar): boolean; overload;
 
 /// return TRUE if the supplied text only contains 7-bits Ansi characters
 function IsAnsiCompatible(const Text: RawByteString): boolean; overload;
   {$ifdef HASINLINE}inline;{$endif}
 
-/// return TRUE if the supplied buffer only contains 7-bits Ansi characters
-function IsAnsiCompatible(PW: PWideChar; Len: integer): boolean; overload;
+/// return TRUE if the supplied UTF-16 buffer only contains 7-bits Ansi characters
+function IsAnsiCompatibleW(PW: PWideChar; Len: integer): boolean; overload;
 
 /// return TRUE if the supplied unicode buffer only contains WinAnsi characters
 // - i.e. if the text can be displayed using ANSI_CHARSET
@@ -1205,21 +1205,21 @@ function Utf8TruncateToUnicodeLength(var text: RawUTF8; maxUtf16: integer): bool
 // - this function will ensure that the returned content will contain only valid
 // UTF-8 sequence, i.e. will trim the whole trailing UTF-8 sequence
 // - returns FALSE if text was not truncated, TRUE otherwise
-function Utf8TruncateToLength(var text: RawUTF8; maxBytes: cardinal): boolean;
+function Utf8TruncateToLength(var text: RawUTF8; maxBytes: PtrUInt): boolean;
 
 /// compute the truncated length of the supplied UTF-8 value if it exceeds the
 // specified bytes count
 // - this function will ensure that the returned content will contain only valid
 // UTF-8 sequence, i.e. will trim the whole trailing UTF-8 sequence
 // - returns maxUTF8 if text was not truncated, or the number of fitting bytes
-function Utf8TruncatedLength(const text: RawUTF8; maxBytes: cardinal): integer; overload;
+function Utf8TruncatedLength(const text: RawUTF8; maxBytes: PtrUInt): PtrInt; overload;
 
 /// compute the truncated length of the supplied UTF-8 value if it exceeds the
 // specified bytes count
 // - this function will ensure that the returned content will contain only valid
 // UTF-8 sequence, i.e. will trim the whole trailing UTF-8 sequence
 // - returns maxUTF8 if text was not truncated, or the number of fitting bytes
-function Utf8TruncatedLength(text: PAnsiChar; textlen,maxBytes: cardinal): integer; overload;
+function Utf8TruncatedLength(text: PAnsiChar; textlen,maxBytes: PtrUInt): PtrInt; overload;
 
 /// calculate the UTF-16 Unicode characters count of the UTF-8 encoded first line
 // - count may not match the UCS4 glyphs number, in case of UTF-16 surrogates
@@ -2511,7 +2511,7 @@ function UrlEncodeJsonObject(const URIName: RawUTF8; ParametersJSON: PUTF8Char;
 
 /// decode a string compatible with URI encoding into its original value
 // - you can specify the decoding range (as in copy(s,i,len) function)
-function UrlDecode(const s: RawUTF8; i: PtrInt = 1; len: PtrInt = -1): RawUTF8; overload;
+function UrlDecode(const s: RawUTF8; i: PtrInt=1; len: PtrInt=-1): RawUTF8; overload;
 
 /// decode a string compatible with URI encoding into its original value
 function UrlDecode(U: PUTF8Char): RawUTF8; overload;
@@ -3024,6 +3024,10 @@ var PosEx: function(const SubStr, S: RawUTF8; Offset: PtrUInt=1): PtrInt;
 function PosEx(const SubStr, S: RawUTF8; Offset: PtrUInt=1): integer;
 
 {$endif PUREPASCAL}
+
+/// our own PosEx() function dedicated to VCL string process
+// - Delphi XE or older don't support Pos() with an Offset
+var PosExString: function(const SubStr, S: string; Offset: PtrUInt=1): PtrInt;
 
 /// optimized version of PosEx() with search text as one AnsiChar
 function PosExChar(Chr: AnsiChar; const Str: RawUTF8): PtrInt;
@@ -4506,15 +4510,15 @@ procedure FillIncreasing(Values: PIntegerArray; StartValue: integer; Count: PtrU
 /// copy some Int64 values into an unsigned integer array
 procedure Int64ToUInt32(Values64: PInt64Array; Values32: PCardinalArray; Count: integer);
 
-/// add the strings in the specified CSV text into a dynamic array of integer
+/// append the strings in the specified CSV text into a dynamic array of integer
 procedure CSVToIntegerDynArray(CSV: PUTF8Char; var Result: TIntegerDynArray;
   Sep: AnsiChar= ',');
 
-/// add the strings in the specified CSV text into a dynamic array of integer
+/// append the strings in the specified CSV text into a dynamic array of integer
 procedure CSVToInt64DynArray(CSV: PUTF8Char; var Result: TInt64DynArray;
   Sep: AnsiChar= ','); overload;
 
-/// add the strings in the specified CSV text into a dynamic array of integer
+/// convert the strings in the specified CSV text into a dynamic array of integer
 function CSVToInt64DynArray(CSV: PUTF8Char; Sep: AnsiChar= ','): TInt64DynArray; overload;
 
 /// return the corresponding CSV text from a dynamic array of 32-bit integer
@@ -6009,13 +6013,13 @@ type
     // LockedInt64[], LockedUTF8[] or LockedPointer[] methods
     // - if you want to access those array values, ensure you protect them
     // using a Safe.Lock; try ... Padding[n] ... finally Safe.Unlock structure,
-    // and maintain the PaddingMaxUsedIndex field accurately
+    // and maintain the PaddingUsedCount field accurately
     Padding: array[0..6] of TVarData;
-    /// maximum index of the last value stored in the internal Padding[] array
-    // - equals -1 if no value is actually stored, or a 0..6 number otherwise
+    /// number of values stored in the internal Padding[] array
+    // - equals 0 if no value is actually stored, or a 1..7 number otherwise
     // - you should not have to use this field, but for optimized low-level
     // direct access to Padding[] values, within a Lock/UnLock safe block
-    PaddingMaxUsedIndex: integer;
+    PaddingUsedCount: integer;
     /// initialize the mutex
     // - calling this method is mandatory (e.g. in the class constructor owning
     // the TSynLocker instance), otherwise you may encounter unexpected
@@ -6792,22 +6796,20 @@ type
 // - will use (slow but) hardware-derivated RDRAND Intel x86/x64 opcode if
 // available, or fast gsl_rng_taus2 generator by Pierre L'Ecuyer (which period
 // is 2^88, i.e. about 10^26) if the CPU doesn't support it
+// - will detect known AMD CPUs RDRAND bugs, and fallback to gsl_rng_taus2
+// - consider Random32gsl to avoid slow RDRAND call (up to 1500 cycles needed!)
 // - use rather TAESPRNG.Main.FillRandom() for cryptographic-level randomness
 // - thread-safe function: each thread will maintain its own gsl_rng_taus2 table
 function Random32: cardinal; overload;
 
 /// fast compute of some 32-bit random value, with a maximum (excluded) upper value
 // - i.e. returns a value in range [0..max-1]
-// - will use (slow but) hardware-derivated RDRAND Intel x86/x64 opcode if
-// available, or fast gsl_rng_taus2 generator by Pierre L'Ecuyer (which period
-// is 2^88, i.e. about 10^26) if the CPU doesn't support it
-// - use rather TAESPRNG.Main.FillRandom() for cryptographic-level randomness
-// - thread-safe function: each thread will maintain its own gsl_rng_taus2 table
+// - calls internally the overloaded Random32 function
 function Random32(max: cardinal): cardinal; overload;
 
 /// fast compute of some 32-bit random value, using the gsl_rng_taus2 generator
-// - plain Random32 may call RDRAND opcode on Intel CPUs, wherease this function
-// will use well documented (and proven) Pierre L'Ecuyer software generator
+// - Random32 may call RDRAND opcode on Intel CPUs, wherease this function will use
+// well documented, much faster, and proven Pierre L'Ecuyer software generator
 // - may be used if you don't want/trust RDRAND, if you expect a well defined
 // cross-platform generator, or have higher performance expectations
 // - use rather TAESPRNG.Main.FillRandom() for cryptographic-level randomness
@@ -6815,6 +6817,7 @@ function Random32(max: cardinal): cardinal; overload;
 function Random32gsl: cardinal; overload;
 
 /// fast compute of bounded 32-bit random value, using the gsl_rng_taus2 generator
+// - calls internally the overloaded Random32gsl function
 function Random32gsl(max: cardinal): cardinal; overload;
 
 /// seed the gsl_rng_taus2 Random32/Random32gsl generator
@@ -6833,8 +6836,8 @@ procedure Random32Seed(entropy: pointer=nil; entropylen: integer=0);
 // gsl_rng_taus2 generator or hardware RDRAND Intel x86/x64 opcode if available
 // (and ForceGsl is kept to its default false value)
 // - consider using instead the cryptographic secure TAESPRNG.Main.FillRandom()
-// method from the SynCrypto unit - in particular, RDRAND could be slow
-// as reported by https://en.wikipedia.org/wiki/RdRand#Performance
+// method from the SynCrypto unit, or set ForceGsl=true - in particular, RDRAND
+// is reported as very slow: see https://en.wikipedia.org/wiki/RdRand#Performance
 procedure FillRandom(Dest: PCardinalArray; CardinalCount: integer; ForceGsl: boolean=false);
 
 /// compute a random GUID value
@@ -11659,6 +11662,7 @@ type
   4: (c: TBlock128);
   5: (b: THash128);
   6: (w: array[0..7] of word);
+  7: (l64,h64: Int64Rec);
   end;
   /// pointer to 128-bit hash map variable record
   PHash128Rec = ^THash128Rec;
@@ -11684,6 +11688,7 @@ type
   5: (q: array[0..3] of QWord);
   6: (c: array[0..7] of cardinal);
   7: (w: array[0..15] of word);
+  8: (l,h: THash128Rec);
   end;
   /// pointer to 256-bit hash map variable record
   PHash256Rec = ^THash256Rec;
@@ -11711,6 +11716,7 @@ type
   7: (b384: THash384);
   8: (w: array[0..31] of word);
   9: (c: array[0..15] of cardinal);
+  10: (l,h: THash256Rec);
   end;
   /// pointer to 512-bit hash map variable record
   PHash512Rec = ^THash512Rec;
@@ -17358,7 +17364,7 @@ procedure TSynAnsiConvert.InternalAppendUTF8(Source: PAnsiChar; SourceChars: Car
 var W: TTextWriter absolute DestTextWriter;
     tmp: TSynTempBuffer;
 begin // rely on explicit conversion
-  SourceChars := AnsiBufferToUTF8(tmp.Init(SourceChars*3+1),Source,SourceChars)-PUTF8Char(tmp.buf);
+  SourceChars := AnsiBufferToUTF8(tmp.Init(SourceChars*3),Source,SourceChars)-PUTF8Char(tmp.buf);
   W.Add(tmp.buf,SourceChars,Escape);
   tmp.Done;
 end;
@@ -17370,13 +17376,14 @@ end;
 
 function TSynAnsiConvert.AnsiToRawUnicode(Source: PAnsiChar; SourceChars: Cardinal): RawUnicode;
 var U: PWideChar;
+    tmp: TSynTempBuffer;
 begin
   if SourceChars=0 then
     result := '' else begin
-    SetString(result,nil,SourceChars*2+1);
-    U := AnsiBufferToUnicode(pointer(result),Source,SourceChars);
+    U := AnsiBufferToUnicode(tmp.Init(SourceChars*2),Source,SourceChars);
     U^ := #0;
-    SetLength(result,PtrUInt(U)-PtrUInt(result)+1);
+    SetString(result,PAnsiChar(tmp.buf),PtrUInt(U)-PtrUInt(tmp.buf)+1);
+    tmp.Done;
   end;
 end;
 
@@ -17386,7 +17393,7 @@ var tmp: TSynTempBuffer;
 begin
   if SourceChars=0 then
     result := '' else begin
-    U := AnsiBufferToUnicode(tmp.Init(SourceChars*2+1),Source,SourceChars);
+    U := AnsiBufferToUnicode(tmp.Init(SourceChars*2),Source,SourceChars);
     SetString(result,PWideChar(tmp.buf),(PtrUInt(U)-PtrUInt(tmp.buf))shr 1);
     tmp.Done;
   end;
@@ -17398,7 +17405,7 @@ var tmp: TSynTempBuffer;
 begin
   if Source='' then
     result := '' else begin
-    tmp.Init(length(Source)*2+1); // max dest size in bytes
+    tmp.Init(length(Source)*2); // max dest size in bytes
     U := AnsiBufferToUnicode(tmp.buf,pointer(Source),length(Source));
     SetString(result,PWideChar(tmp.buf),(PtrUInt(U)-PtrUInt(tmp.buf))shr 1);
     tmp.Done;
@@ -17415,7 +17422,7 @@ var tmp: TSynTempBuffer;
 begin
   if (Source=nil) or (SourceChars=0) then
     result := '' else
-    tmp.Done(AnsiBufferToUTF8(tmp.Init(SourceChars*3+1),Source,SourceChars),result);
+    tmp.Done(AnsiBufferToUTF8(tmp.Init(SourceChars*3),Source,SourceChars),result);
 end;
 
 constructor TSynAnsiConvert.Create(aCodePage: cardinal);
@@ -18044,7 +18051,7 @@ var tmp: TSynTempBuffer;
 begin
   if (Source=nil) or (SourceChars=0) then
     result := '' else begin
-    tmp.Init(SourceChars*3+1);
+    tmp.Init(SourceChars*3);
     FastSetStringCP(result,tmp.buf,UnicodeBufferToUTF8(tmp.buf,
       SourceChars*3,Source,SourceChars)-PAnsiChar(tmp.buf),fCodePage);
     tmp.Done;
@@ -18407,7 +18414,7 @@ begin
   result := IsAnsiCompatible(PAnsiChar(pointer(Text)),length(Text));
 end;
 
-function IsAnsiCompatible(PW: PWideChar): boolean;
+function IsAnsiCompatibleW(PW: PWideChar): boolean;
 begin
   result := false;
   if PW<>nil then
@@ -18420,7 +18427,7 @@ begin
   result := true;
 end;
 
-function IsAnsiCompatible(PW: PWideChar; Len: integer): boolean;
+function IsAnsiCompatibleW(PW: PWideChar; Len: integer): boolean;
 var i: integer;
 begin
   result := false;
@@ -18807,9 +18814,9 @@ begin
   result := false;
 end;
 
-function Utf8TruncateToLength(var text: RawUTF8; maxBytes: cardinal): boolean;
+function Utf8TruncateToLength(var text: RawUTF8; maxBytes: PtrUInt): boolean;
 begin
-  if cardinal(length(text))<maxBytes then begin
+  if PtrUInt(length(text))<maxBytes then begin
     result := false;
     exit; // nothing to truncate
   end;
@@ -18819,17 +18826,17 @@ begin
   result := true;
 end;
 
-function Utf8TruncatedLength(const text: RawUTF8; maxBytes: cardinal): integer;
+function Utf8TruncatedLength(const text: RawUTF8; maxBytes: PtrUInt): PtrInt;
 begin
   result := length(text);
-  if cardinal(result)<maxBytes then
+  if PtrUInt(result)<maxBytes then
     exit;
   result := maxBytes;
   while (result>0) and (ord(text[result]) and $c0=$80) do dec(result);
   if (result>0) and (ord(text[result]) and $80<>0) then dec(result);
 end;
 
-function Utf8TruncatedLength(text: PAnsiChar; textlen,maxBytes: cardinal): integer;
+function Utf8TruncatedLength(text: PAnsiChar; textlen,maxBytes: PtrUInt): PtrInt;
 begin
   if textlen<maxBytes then begin
     result := textlen;
@@ -18841,8 +18848,7 @@ begin
 end;
 
 function Utf8FirstLineToUnicodeLength(source: PUTF8Char): PtrInt;
-var c: PtrUInt;
-    extra: Integer;
+var c,extra: PtrUInt;
 begin
   result := 0;
   if source<>nil then
@@ -19078,7 +19084,7 @@ end;
 
 function Ansi7ToString(const Text: RawByteString): string;
 {$ifdef UNICODE}
-var i: integer;
+var i: PtrInt;
 begin
   SetString(result,nil,length(Text));
   for i := 0 to length(Text)-1 do
@@ -19101,7 +19107,7 @@ end;
 
 procedure Ansi7ToString(Text: PWinAnsiChar; Len: integer; var result: string);
 {$ifdef UNICODE}
-var i: integer;
+var i: PtrInt;
 begin
   SetString(result,nil,Len);
   for i := 0 to Len-1 do
@@ -19115,7 +19121,7 @@ end;
 
 function StringToAnsi7(const Text: string): RawByteString;
 {$ifdef UNICODE}
-var i: integer;
+var i: PtrInt;
 begin
   SetString(result,nil,length(Text));
   for i := 0 to length(Text)-1 do
@@ -20390,7 +20396,7 @@ begin
   result := '';
   if (Baudot=nil) or (len<=0) then
     exit;
-  dest := tmp.Init((len shl 3)div 5+1);
+  dest := tmp.Init((len shl 3)div 5);
   try
     shift := 0;
     b := 0;
@@ -21228,14 +21234,14 @@ function GetEnumTrimmedNames(aTypeInfo: pointer): TRawUTF8DynArray;
 var MaxValue, i: integer;
     res: PShortString;
 begin
+  Finalize(result);
   res := GetEnumInfo(aTypeInfo,MaxValue);
   if res=nil then
-    result := nil else begin
-    SetLength(result,MaxValue+1);
-    for i := 0 to MaxValue do begin
-      result[i] := TrimLeftLowerCaseShort(res);
-      inc(PByte(res),PByte(res)^+1); // next
-    end;
+     exit;
+  SetLength(result,MaxValue+1);
+  for i := 0 to MaxValue do begin
+    result[i] := TrimLeftLowerCaseShort(res);
+    inc(PByte(res),PByte(res)^+1); // next
   end;
 end;
 
@@ -22758,6 +22764,79 @@ begin
   result := 0;
 end;
 
+// same as PosExPas() but using PChar internally for proper string process
+function PosExStringPas(pSub, p: PChar; Offset: PtrUInt): PtrInt;
+var len, lenSub: PtrInt;
+    ch: char;
+    pStart, pStop: PChar;
+label Loop2, Loop6, TestT, Test0, Test1, Test2, Test3, Test4,
+      AfterTestT, AfterTest0, Ret, Exit;
+begin
+  result := 0;
+  if (p=nil) or (pSub=nil) or (PtrInt(Offset)<=0) then
+    goto Exit;
+  {$ifdef FPC}
+  len := _LStrLenP(p);
+  lenSub := _LStrLenP(pSub)-1;
+  {$else}
+  len := PInteger(PtrInt(p)-4)^;
+  lenSub := PInteger(PtrInt(pSub)-4)^-1;
+  {$endif FPC}
+  if (len<lenSub+PtrInt(Offset)) or (lenSub<0) then
+    goto Exit;
+  pStop := p+len;
+  inc(p,lenSub);
+  inc(pSub,lenSub);
+  pStart := p;
+  inc(p,Offset+3);
+  ch := pSub[0];
+  lenSub := -lenSub;
+  if p<pStop then goto Loop6;
+  dec(p,4);
+  goto Loop2;
+Loop6: // check 6 chars per loop iteration
+  if ch=p[-4] then goto Test4;
+  if ch=p[-3] then goto Test3;
+  if ch=p[-2] then goto Test2;
+  if ch=p[-1] then goto Test1;
+Loop2:
+  if ch=p[0] then goto Test0;
+AfterTest0:
+  if ch=p[1] then goto TestT;
+AfterTestT:
+  inc(p,6);
+  if p<pStop then goto Loop6;
+  dec(p,4);
+  if p>=pStop then goto Exit;
+  goto Loop2;
+Test4: dec(p,2);
+Test2: dec(p,2);
+  goto Test0;
+Test3: dec(p,2);
+Test1: dec(p,2);
+TestT: len := lenSub;
+  if lenSub<>0 then
+    repeat
+      if (psub[len]<>p[len+1]) or (psub[len+1]<>p[len+2]) then
+        goto AfterTestT;
+      inc(len,2);
+    until len>=0;
+  inc(p,2);
+  if p<=pStop then goto Ret;
+  goto Exit;
+Test0: len := lenSub;
+  if lenSub<>0 then
+    repeat
+      if (psub[len]<>p[len]) or (psub[len+1]<>p[len+1]) then
+        goto AfterTest0;
+      inc(len,2);
+    until len>=0;
+  inc(p);
+Ret:
+  result := p-pStart;
+Exit:
+end;
+
 procedure AppendCharToRawUTF8(var Text: RawUTF8; Ch: AnsiChar);
 var L: PtrInt;
 begin
@@ -22812,16 +22891,18 @@ end;
 
 function AppendUInt32ToBuffer(Buffer: PUTF8Char; Value: cardinal): PUTF8Char;
 var L: PtrInt;
-    tmp: array[0..23] of AnsiChar;
     P: PAnsiChar;
+    tmp: array[0..23] of AnsiChar;
 begin
-  if Value<=high(SmallUInt32UTF8) then
-    result := AppendRawUTF8ToBuffer(Buffer,SmallUInt32UTF8[Value]) else begin
+  if Value<=high(SmallUInt32UTF8) then begin
+    P := pointer(SmallUInt32UTF8[Value]);
+    L := {$ifdef FPC}_LStrLenP(P){$else}PInteger(P-4)^{$endif};
+  end else begin
     P := StrUInt32(@tmp[23],Value);
     L := @tmp[23]-P;
-    MoveSmall(P,Buffer,L);
-    result := Buffer+L;
   end;
+  MoveSmall(P,Buffer,L);
+  result := Buffer+L;
 end;
 
 function QuotedStr(const S: RawUTF8; Quote: AnsiChar): RawUTF8;
@@ -23678,11 +23759,11 @@ Txt:  len := F-FDeb;
   if not JSONFormat and (tmpN>SizeOf(inlin)shl 3) then
     raise ESynException.CreateUTF8(
       'Too many parameters for FormatUTF8(): %>%',[tmpN,SizeOf(inlin)shl 3]);
-  SetLength(result,L);
+  FastSetString(result,nil,L);
   F := pointer(result);
   for i := 0 to tmpN-1 do
   if tmp[i]<>'' then begin
-    if i in inlin then begin
+    if byte(i) in inlin then begin
       PWord(F)^ := ord(':')+ord('(')shl 8;
       inc(F,2);
     end;
@@ -23691,7 +23772,7 @@ Txt:  len := F-FDeb;
       MoveSmall(pointer(tmp[i]),F,L) else{$endif}
       {$ifdef FPC}Move{$else}MoveFast{$endif}(pointer(tmp[i])^,F^,L);
     inc(F,L);
-    if i in inlin then begin
+    if byte(i) in inlin then begin
       PWord(F)^ := ord(')')+ord(':')shl 8;
       inc(F,2);
     end;
@@ -24112,7 +24193,7 @@ label Loop2, Loop6, TestT, Test0, Test1, Test2, Test3, Test4,
       AfterTestT, AfterTest0, Ret, Exit;
 begin
   result := 0;
-  if (p=nil) or (pSub=nil) or (Offset<1) then
+  if (p=nil) or (pSub=nil) or (PtrInt(Offset)<=0) then
     goto Exit;
   {$ifdef FPC}
   len := _LStrLenP(p);
@@ -27534,24 +27615,24 @@ end;
 
 function HexDisplayToBin(Hex: PAnsiChar; Bin: PByte; BinBytes: integer): boolean;
 var B,C: PtrUInt;
-    i: integer;
     tab: {$ifdef CPUX86NOTPIC}TNormTableByte absolute ConvertHexToBin{$else}PNormTableByte{$endif};
 begin
   result := false; // return false if any invalid char
   if (Hex=nil) or (Bin=nil) then
     exit;
   {$ifndef CPUX86NOTPIC}tab := @ConvertHexToBin;{$endif} // faster on PIC and x86_64
-  inc(Bin,BinBytes-1);
-  for i := 1 to BinBytes do begin
-    B := tab[Ord(Hex^)];
-    inc(Hex);
-    if B>15 then exit;
-    B := B shl 4;
-    C := tab[Ord(Hex^)];
-    inc(Hex);
-    if C>15 then exit;
-    Bin^ := B+C;
-    dec(Bin);
+  if BinBytes>0 then begin
+    inc(Bin,BinBytes-1);
+    repeat
+      B := tab[Ord(Hex[0])];
+      C := tab[Ord(Hex[1])];
+      if (B>15) or (C>15) then
+        exit;
+      Bin^ := B shl 4+C;
+      dec(Bin);
+      inc(Hex,2);
+      dec(BinBytes);
+    until BinBytes=0;
   end;
   result := true; // correct content in Hex
 end;
@@ -27577,34 +27658,31 @@ begin
 end;
 
 function HexToBin(Hex: PAnsiChar; Bin: PByte; BinBytes: Integer): boolean;
-var I: Integer;
-    B,C: PtrUInt;
+var B,C: PtrUInt;
     tab: {$ifdef CPUX86NOTPIC}TNormTableByte absolute ConvertHexToBin{$else}PNormTableByte{$endif};
 begin
   result := false; // return false if any invalid char
   if Hex=nil then
     exit;
   {$ifndef CPUX86NOTPIC}tab := @ConvertHexToBin;{$endif} // faster on PIC and x86_64
-  if Bin<>nil then
-    for I := 1 to BinBytes do begin
-      B := tab[Ord(Hex^)];
-      inc(Hex);
-      if B>15 then exit;
-      B := B shl 4;
-      C := tab[Ord(Hex^)];
-      inc(Hex);
-      if C>15 then exit;
-      Bin^ := B+C;
-      inc(Bin);
-    end else
-    for I := 1 to BinBytes do begin // Bin=nil -> validate Hex^ input
-      B := tab[Ord(Hex^)];
-      inc(Hex);
-      if B>15 then exit;
-      C := tab[Ord(Hex^)];
-      inc(Hex);
-      if C>15 then exit;
-    end;
+  if BinBytes>0 then
+    if Bin<>nil then
+      repeat
+        B := tab[Ord(Hex[0])];
+        C := tab[Ord(Hex[1])];
+        if (B>15) or (C>15) then
+          exit;
+        inc(Hex,2);
+        Bin^ := B shl 4+C;
+        inc(Bin);
+        dec(BinBytes);
+      until BinBytes=0 else
+      repeat // Bin=nil -> validate Hex^ input
+        if (tab[Ord(Hex[0])]>15) or (tab[Ord(Hex[1])]>15) then
+          exit;
+        inc(Hex,2);
+        dec(BinBytes);
+      until BinBytes=0;
   result := true; // conversion OK
 end;
 
@@ -27621,17 +27699,17 @@ end;
 
 function HexToChar(Hex: PAnsiChar; Bin: PUTF8Char): boolean;
 var B,C: PtrUInt;
+    tab: {$ifdef CPUX86NOTPIC}TNormTableByte absolute ConvertHexToBin{$else}PNormTableByte{$endif};
 begin
   if Hex<>nil then begin
-    B := ConvertHexToBin[Ord(Hex[0])];
-    if B<=15 then begin
-      C := ConvertHexToBin[Ord(Hex[1])];
-      if C<=15 then begin
-        if Bin<>nil then
-          Bin^ := AnsiChar(B shl 4+C);
-        result := true;
-        exit;
-      end;
+    {$ifndef CPUX86NOTPIC}tab := @ConvertHexToBin;{$endif} // faster on PIC and x86_64
+    B := tab[Ord(Hex[0])];
+    C := tab[Ord(Hex[1])];
+    if (B<=15) and (C<=15) then begin
+      if Bin<>nil then
+        Bin^ := AnsiChar(B shl 4+C);
+      result := true;
+      exit;
     end;
   end;
   result := false; // return false if any invalid char
@@ -27868,7 +27946,7 @@ begin
   result := '';
   if BinBytes=0 then
     exit;
-  SetLength(result,BinToBase64Length(BinBytes));
+  FastSetString(result,nil,BinToBase64Length(BinBytes));
   Base64Encode(pointer(result),Bin,BinBytes);
 end;
 
@@ -27885,7 +27963,7 @@ begin
   len := ((lendata+2) div 3)*4+lenprefix+lensuffix;
   if WithMagic then
     inc(len,3);
-  SetLength(result,len);
+  FastSetString(result,nil,len);
   if lenprefix>0 then
     MoveSmall(pointer(Prefix),res,lenprefix);
   if WithMagic then begin
@@ -27904,7 +27982,7 @@ begin
   len := length(data);
   if len=0 then
     exit;
-  SetLength(result,((len+2) div 3)*4+3);
+  FastSetString(result,nil,((len+2) div 3)*4+3);
   PInteger(pointer(result))^ := JSON_BASE64_MAGIC;
   Base64Encode(PAnsiChar(pointer(result))+3,pointer(data),len);
 end;
@@ -27914,7 +27992,7 @@ begin
   result := '';
   if DataLen<=0 then
     exit;
-  SetLength(result,((DataLen+2) div 3)*4+3);
+  FastSetString(result,nil,((DataLen+2) div 3)*4+3);
   PInteger(pointer(result))^ := JSON_BASE64_MAGIC;
   Base64Encode(PAnsiChar(pointer(result))+3,Data,DataLen);
 end;
@@ -28170,7 +28248,7 @@ begin
   len := length(s);
   if len=0 then
     exit;
-  SetLength(result,BinToBase64uriLength(len));
+  FastSetString(result,nil,BinToBase64uriLength(len));
   Base64uriEncode(pointer(result),pointer(s),len);
 end;
 
@@ -28179,7 +28257,7 @@ begin
   result := '';
   if BinBytes<=0 then
     exit;
-  SetLength(result,BinToBase64uriLength(BinBytes));
+  FastSetString(result,nil,BinToBase64uriLength(BinBytes));
   Base64uriEncode(pointer(result),Bin,BinBytes);
 end;
 
@@ -28507,6 +28585,7 @@ end;
 function HexToBin(const Hex: RawUTF8): RawByteString;
 var L: integer;
 begin
+  result := '';
   L := length(Hex);
   if L and 1<>0 then
     L := 0 else // hexadecimal should be in char pairs
@@ -28565,7 +28644,7 @@ end;
 
 function LogEscapeFull(source: PAnsiChar; sourcelen: integer): RawUTF8;
 begin
-  SetLength(result,sourcelen*3); // worse case
+  FastSetString(result,nil,sourcelen*3); // worse case
   if sourcelen=0 then
     exit;
   sourcelen := EscapeBuffer(source,pointer(result),sourcelen,length(result))-pointer(result);
@@ -29033,6 +29112,7 @@ procedure StringDynArrayToRawUTF8DynArray(const Source: TStringDynArray;
   var Result: TRawUTF8DynArray);
 var i: Integer;
 begin
+  Finalize(result);
   SetLength(Result,length(Source));
   for i := 0 to high(Source) do
     StringToUTF8(Source[i],Result[i]);
@@ -29041,6 +29121,7 @@ end;
 procedure StringListToRawUTF8DynArray(Source: TStringList; var Result: TRawUTF8DynArray);
 var i: Integer;
 begin
+  Finalize(result);
   SetLength(Result,Source.Count);
   for i := 0 to Source.Count-1 do
     StringToUTF8(Source[i],Result[i]);
@@ -29592,7 +29673,7 @@ begin
         Read := FileRead(F,tmp,SizeOf(tmp));
         if Read<=0 then
           break;
-        SetLength(result,Size+Read);
+        SetLength(result,Size+Read); // in-place resize
         {$ifdef FPC}Move{$else}MoveFast{$endif}(tmp,PByteArray(result)^[Size],Read);
         inc(Size,Read);
       until false;
@@ -29764,7 +29845,7 @@ begin
   L := 0;
   if (S.Read(L,4)<>4) or (L<=0) or (L>MaxAllowedSize) then
     exit;
-  SetLength(result,L);
+  FastSetString(result,nil,L);
   if S.Read(pointer(result)^,L)<>L then
     result := '';
 end;
@@ -30111,6 +30192,7 @@ end;
 function FindFilesDynArrayToFileNames(const Files: TFindFilesDynArray): TFileNameDynArray;
 var i,n: integer;
 begin
+  Finalize(result);
   n := length(Files);
   SetLength(result,n);
   for i := 0 to n-1 do
@@ -30136,7 +30218,7 @@ var folder: TFileName;
 begin // fast cross-platform implementation
   folder := GetSystemPath(spTempFolder);
   if TemporaryFileNameRandom=0 then
-    TemporaryFileNameRandom := Random32;
+    TemporaryFileNameRandom := Random32gsl;
   repeat // thread-safe unique file name generation
     FormatString('%%_%.tmp',[folder,ExeVersion.ProgramName,
       CardinalToHexShort(InterlockedIncrement(TemporaryFileNameRandom))],string(result));
@@ -30814,6 +30896,7 @@ end;
 
 function CSVToInt64DynArray(CSV: PUTF8Char; Sep: AnsiChar): TInt64DynArray;
 begin
+  Finalize(result);
   while CSV<>nil do begin
     SetLength(Result,length(Result)+1);
     Result[high(Result)] := GetNextItemInt64(CSV,Sep);
@@ -30852,7 +30935,7 @@ begin
       SetString(ints[i],P,L);
     end;
     // create result
-    SetLength(result,Len);
+    FastSetString(result,nil,Len);
     P := pointer(result);
     if Prefix<>'' then begin
       L := length(Prefix);
@@ -30912,7 +30995,7 @@ begin
       inc(int);
     end;
     // create result
-    SetLength(result,Len);
+    FastSetString(result,nil,Len);
     P := pointer(result);
     if Prefix<>'' then begin
       L := length(Prefix);
@@ -31483,7 +31566,7 @@ begin
 end;
 
 function AddSortedInteger(var Values: TIntegerDynArray; var ValuesCount: integer;
-  Value: integer; CoValues: PIntegerDynArray=nil): PtrInt;
+  Value: integer; CoValues: PIntegerDynArray): PtrInt;
 begin
   result := FastLocateIntegerSorted(pointer(Values),ValuesCount-1,Value);
   if result>=0 then // if Value exists -> fails
@@ -31491,7 +31574,7 @@ begin
 end;
 
 function AddSortedInteger(var Values: TIntegerDynArray;
-  Value: integer; CoValues: PIntegerDynArray=nil): PtrInt;
+  Value: integer; CoValues: PIntegerDynArray): PtrInt;
 var ValuesCount: integer;
 begin
   ValuesCount := length(Values);
@@ -31503,7 +31586,7 @@ begin
 end;
 
 function InsertInteger(var Values: TIntegerDynArray; var ValuesCount: integer;
-  Value: Integer; Index: PtrInt; CoValues: PIntegerDynArray=nil): PtrInt;
+  Value: Integer; Index: PtrInt; CoValues: PIntegerDynArray): PtrInt;
 var n: PtrInt;
 begin
   result := Index;
@@ -31529,16 +31612,18 @@ end;
 function TIntegerDynArrayFrom(const Values: array of integer): TIntegerDynArray;
 var i: PtrInt;
 begin
+  Finalize(result);
   SetLength(result,length(Values));
   for i := 0 to high(Values) do
     result[i] := Values[i];
 end;
 
 function TIntegerDynArrayFrom64(const Values: TInt64DynArray;
-  raiseExceptionOnOverflow: boolean=true): TIntegerDynArray;
+  raiseExceptionOnOverflow: boolean): TIntegerDynArray;
 var i: PtrInt;
 const MinInt = -MaxInt-1;
 begin
+  Finalize(result);
   SetLength(result,length(Values));
   for i := 0 to high(Values) do
     if Values[i]>MaxInt then
@@ -31557,6 +31642,7 @@ end;
 function TInt64DynArrayFrom(const Values: TIntegerDynArray): TInt64DynArray;
 var i: PtrInt;
 begin
+  Finalize(result);
   SetLength(result,length(Values));
   for i := 0 to high(Values) do
     result[i] := Values[i];
@@ -31565,6 +31651,7 @@ end;
 function TQWordDynArrayFrom(const Values: TCardinalDynArray): TQWordDynArray;
 var i: PtrInt;
 begin
+  Finalize(result);
   SetLength(result,length(Values));
   for i := 0 to high(Values) do
     result[i] := Values[i];
@@ -31573,6 +31660,7 @@ end;
 function FromI32(const Values: array of integer): TIntegerDynArray;
 var i: PtrInt;
 begin
+  Finalize(result);
   SetLength(result,length(Values));
   for i := 0 to high(Values) do
     result[i] := Values[i];
@@ -31581,6 +31669,7 @@ end;
 function FromU32(const Values: array of cardinal): TCardinalDynArray;
 var i: PtrInt;
 begin
+  Finalize(result);
   SetLength(result,length(Values));
   for i := 0 to high(Values) do
     result[i] := Values[i];
@@ -31589,6 +31678,7 @@ end;
 function FromI64(const Values: array of Int64): TInt64DynArray;
 var i: PtrInt;
 begin
+  Finalize(result);
   SetLength(result,length(Values));
   for i := 0 to high(Values) do
     result[i] := Values[i];
@@ -31597,6 +31687,7 @@ end;
 function FromU64(const Values: array of QWord): TQWordDynArray;
 var i: PtrInt;
 begin
+  Finalize(result);
   SetLength(result,length(Values));
   for i := 0 to high(Values) do
     result[i] := Values[i];
@@ -33167,7 +33258,7 @@ begin // CSVOfValue('?',3)='?,?,?'
     exit;
   ValueLen := length(Value);
   SepLen := Length(Sep);
-  Setlength(result,ValueLen*Count+SepLen*pred(Count));
+  FastSetString(result,nil,ValueLen*Count+SepLen*pred(Count));
   P := pointer(result);
   i := 1;
   repeat
@@ -33524,7 +33615,7 @@ begin
   len := seplen*high(Values);
   for i := 0 to high(Values) do
     inc(len,length(Values[i]));
-  SetLength(result,len);
+  FastSetString(result,nil,len);
   P := pointer(result);
   i := 0;
   repeat
@@ -33557,6 +33648,7 @@ end;
 function TRawUTF8DynArrayFrom(const Values: array of RawUTF8): TRawUTF8DynArray;
 var i: integer;
 begin
+  Finalize(result);
   SetLength(result,length(Values));
   for i := 0 to high(Values) do
     result[i] := Values[i];
@@ -33691,7 +33783,7 @@ begin
   result := '';
   if Text=nil then
     exit;
-  SetLength(result,Size(Text)); // reserve exact memory count
+  FastSetString(result,nil,Size(Text)); // reserve exact memory count
   Enc(Text,pointer(result));
 end;
 
@@ -33783,9 +33875,10 @@ begin
     end;
 end;
 
-function UrlDecode(const s: RawUTF8; i: PtrInt = 1; len: PtrInt = -1): RawUTF8;
+function UrlDecode(const s: RawUTF8; i,len: PtrInt): RawUTF8;
 var L: PtrInt;
     P: PUTF8Char;
+    tmp: TSynTempBuffer;
 begin
   result := '';
   if s='' then
@@ -33798,8 +33891,7 @@ begin
   dec(i);
   if len=i then
     exit;
-  Setlength(result,len-i); // reserve enough space for result
-  P := pointer(result);
+  P := tmp.Init(len-i);  // reserve enough space for result
   while i<len do begin
     case s[i+1] of
       #0:  break; // reached end of s
@@ -33813,24 +33905,19 @@ begin
     inc(i);
     inc(P);
   end;
-  Setlength(result,P-pointer(Result)); // fast with FastMM4/SynScaleMM (in-place realloc)
+  tmp.Done(P,result);
 end;
 
 function UrlDecode(U: PUTF8Char): RawUTF8;
-var P,Dest: PUTF8Char;
+var P: PUTF8Char;
     L: integer;
-    tmp: array[byte] of AnsiChar;
+    tmp: TSynTempBuffer;
 begin
 result := '';
   L := StrLen(U);
   if L=0 then
     exit;
-  if L>SizeOf(tmp) then begin
-    SetLength(result,L);
-    Dest := pointer(result);
-  end else
-    Dest := @tmp;
-  P := Dest;
+  P := tmp.Init(L);
   repeat
     case U^ of
       #0:  break; // reached end of URI
@@ -33844,14 +33931,12 @@ result := '';
     inc(U);
     inc(P);
   until false;
-  if Dest=@tmp then
-    FastSetString(result,@tmp,P-Dest) else
-    SetLength(result,P-Dest);
+  tmp.Done(P,result);
 end;
 
 function UrlDecodeNextValue(U: PUTF8Char; out Value: RawUTF8): PUTF8Char;
 var Beg,V: PUTF8Char;
-    len, i: PtrInt;
+    len: PtrInt;
 begin
   if U<>nil then begin
     // compute resulting length of value
@@ -33864,27 +33949,31 @@ begin
       inc(len);
     end;
     // decode value content
-    SetLength(Value,len);
-    V := pointer(Value);
-    U := Beg;
-    for i := 1 to len do
-      if (U^='%') and HexToChar(PAnsiChar(U+1),V) then begin
-        inc(V);
-        inc(U,3);
-      end else begin
-        if U^='+' then
-          V^ := ' ' else
-          V^ := U^;
-        inc(V);
-        inc(U);
-      end;
+    if len<>0 then begin
+      FastSetString(Value,nil,len);
+      V := pointer(Value);
+      U := Beg;
+      repeat
+        if (U^='%') and HexToChar(PAnsiChar(U+1),V) then begin
+          inc(V);
+          inc(U,3);
+        end else begin
+          if U^='+' then
+            V^ := ' ' else
+            V^ := U^;
+          inc(V);
+          inc(U);
+        end;
+        dec(len);
+      until len=0;
+    end;
   end;
   result := U;
 end;
 
 function UrlDecodeNextName(U: PUTF8Char; out Name: RawUTF8): PUTF8Char;
 var Beg, V: PUTF8Char;
-    len, i: PtrInt;
+    len: PtrInt;
 begin
   result := nil;
   if U=nil then
@@ -33910,11 +33999,13 @@ begin
     end;
     inc(len);
   until false;
+  if len=0 then
+    exit;
   // decode name content
-  SetLength(Name,len);
+  FastSetString(Name,nil,len);
   V := pointer(Name);
   U := Beg;
-  for i := 1 to len do
+  repeat
     if (U^='%') and HexToChar(PAnsiChar(U+1),V) then begin
       inc(V);
       inc(U,3);
@@ -33925,6 +34016,8 @@ begin
       inc(V);
       inc(U);
     end;
+    dec(len);
+  until len=0;
 end;
 
 function UrlDecodeNextNameValue(U: PUTF8Char; var Name,Value: RawUTF8): PUTF8Char;
@@ -37571,9 +37664,13 @@ end;
 function Random32: cardinal;
 begin
   {$ifdef CPUINTEL}
-  if cfRAND in CpuFeatures then
-    result := RdRand32 else
-  {$endif}
+  if cfRAND in CpuFeatures then begin
+    result := RdRand32;
+    if ((integer(result)<>-1) and (result<>0)) or (RdRand32<>result) then
+      exit; // ensure not affected by old AMD bug after suspend to RAM
+    exclude(CpuFeatures,cfRAND); // disable if weakness detected
+  end;
+  {$endif CPUINTEL}
     result := _Lecuyer.Next;
 end;
 
@@ -37598,34 +37695,33 @@ var i: PtrInt;
     seed: TQWordRec;
     lecuyer: ^TLecuyer;
 begin
+  if CardinalCount<=0 then
+    exit;
   {$ifdef CPUINTEL}
   if (cfRAND in CpuFeatures) and not forcegsl then
     lecuyer := nil else
-  {$endif}
+  {$endif CPUINTEL}
     lecuyer := @_Lecuyer;
   QueryPerformanceCounter(PInt64(@seed)^);
   c := crc32cBy4(seed.L,seed.H);
-  {$ifdef CPUINTEL}
-  if lecuyer=nil then
-    for i := 0 to CardinalCount-1 do begin
-      c := crc32cBy4(c,RdRand32); // won't trust plain Intel values
-      Dest^[i] := Dest^[i] xor c;
-    end else
-  {$endif}
-    for i := 0 to CardinalCount-1 do begin
+  for i := 0 to CardinalCount-1 do begin
+    {$ifdef CPUINTEL}
+    if lecuyer=nil then
+      c := crc32cBy4(c,RdRand32) else // never trust plain Intel values
+    {$endif CPUINTEL}
       c := c xor lecuyer^.Next;
-      Dest^[i] := Dest^[i] xor c;
-    end;
+    Dest^[i] := Dest^[i] xor c;
+  end;
 end;
 
 function RandomGUID: TGUID;
 begin
-  FillRandom(@result,SizeOf(TGUID) shr 2);
+  FillRandom(@result,SizeOf(TGUID) shr 2,{forcegsl=}true);
 end;
 
 procedure RandomGUID(out result: TGUID);
 begin
-  FillRandom(@result,SizeOf(TGUID) shr 2);
+  FillRandom(@result,SizeOf(TGUID) shr 2,{forcegsl=}true);
 end;
 
 procedure FillZero(var result: TGUID);
@@ -37925,12 +38021,14 @@ end;
 {$endif FPC_OR_PUREPASCAL}
 
 function UnCamelCase(const S: RawUTF8): RawUTF8;
+var tmp: TSynTempBuffer;
+    destlen: PtrInt;
 begin
-  result := '';
   if S='' then
-    exit;
-  SetLength(result,length(S)*2); // max length
-  SetLength(result,UnCamelCase(pointer(result),pointer(S)));
+    result := '' else begin
+    destlen := UnCamelCase(tmp.Init(length(S)*2),pointer(S));
+    tmp.Done(PAnsiChar(tmp.buf)+destlen,result);
+  end;
 end;
 
 function UnCamelCase(D, P: PUTF8Char): integer;
@@ -38487,7 +38585,7 @@ var len, boundcount, filescount, i: integer;
   procedure NewBound;
   var random: array[1..3] of cardinal;
   begin
-    FillRandom(@random,3);
+    FillRandom(@random,3,{forcegsl=}true);
     bound := BinToBase64(@random,SizeOf(Random));
     SetLength(boundaries,boundcount+1);
     boundaries[boundcount] := bound;
@@ -38995,7 +39093,6 @@ begin
             aRelease := dwFileVersionLS shr 16;
           end;
           aBuild := word(dwFileVersionLS);
-          BuildYear := 2010;
           if (dwFileDateLS<>0) and (dwFileDateMS<>0) then begin
             FileTime.dwLowDateTime:= dwFileDateLS; // built date from version info
             FileTime.dwHighDateTime:= dwFileDateMS;
@@ -51282,20 +51379,23 @@ end;
 
 { TSynLocker }
 
+const
+  SYNLOCKER_VTYPENOCLEAR = [varEmpty..varDate,varBoolean,varShortInt..varWord64,varUnknown];
+
 procedure TSynLocker.Init;
 begin
   fSectionPadding := 0;
+  PaddingUsedCount := 0;
   InitializeCriticalSection(fSection);
-  PaddingMaxUsedIndex := -1;
   fLocked := false;
   fInitialized := true;
 end;
 
 procedure TSynLocker.Done;
-var i: integer;
+var i: PtrInt;
 begin
-  for i := 0 to PaddingMaxUsedIndex do
-    if Padding[i].VType<>varUnknown then
+  for i := 0 to PaddingUsedCount-1 do
+    if not(Padding[i].VType in SYNLOCKER_VTYPENOCLEAR) then
       VarClear(variant(Padding[i]));
   DeleteCriticalSection(fSection);
   fInitialized := false;
@@ -51345,7 +51445,7 @@ end;
 
 function TSynLocker.GetVariant(Index: integer): Variant;
 begin
-  if (Index>=0) and (Index<=PaddingMaxUsedIndex) then // PaddingMaxUsedIndex may be -1
+  if cardinal(Index)<cardinal(PaddingUsedCount) then
     try
       EnterCriticalSection(fSection);
       fLocked := true;
@@ -51363,8 +51463,8 @@ begin
     try
       EnterCriticalSection(fSection);
       fLocked := true;
-      if Index>PaddingMaxUsedIndex then
-        PaddingMaxUsedIndex := Index;
+      if Index>=PaddingUsedCount then
+        PaddingUsedCount := Index+1;
       variant(Padding[Index]) := Value;
     finally
       fLocked := false;
@@ -51374,7 +51474,7 @@ end;
 
 function TSynLocker.GetInt64(Index: integer): Int64;
 begin
-  if (Index>=0) and (Index<=PaddingMaxUsedIndex) then
+  if cardinal(Index)<cardinal(PaddingUsedCount) then
     try
       EnterCriticalSection(fSection);
       fLocked := true;
@@ -51394,7 +51494,7 @@ end;
 
 function TSynLocker.GetBool(Index: integer): boolean;
 begin
-  if (Index>=0) and (Index<=PaddingMaxUsedIndex) then
+  if cardinal(Index)<cardinal(PaddingUsedCount) then
     try
       EnterCriticalSection(fSection);
       fLocked := true;
@@ -51414,7 +51514,7 @@ end;
 
 function TSynLocker.GetUnLockedInt64(Index: integer): Int64;
 begin
-  if (Index<0) or (Index>PaddingMaxUsedIndex) or
+  if (cardinal(Index)>=cardinal(PaddingUsedCount)) or
      not VariantToInt64(variant(Padding[index]),result) then
     result := 0;
 end;
@@ -51422,15 +51522,15 @@ end;
 procedure TSynLocker.SetUnlockedInt64(Index: integer; const Value: Int64);
 begin
   if cardinal(Index)<=high(Padding) then begin
-    if Index>PaddingMaxUsedIndex then
-      PaddingMaxUsedIndex := Index;
+    if Index>=PaddingUsedCount then
+      PaddingUsedCount := Index+1;
     variant(Padding[Index]) := Value;
   end;
 end;
 
 function TSynLocker.GetPointer(Index: integer): Pointer;
 begin
-  if (Index>=0) and (Index<=PaddingMaxUsedIndex) then
+  if cardinal(Index)<cardinal(PaddingUsedCount) then
     try
       EnterCriticalSection(fSection);
       fLocked := true;
@@ -51451,13 +51551,12 @@ begin
     try
       EnterCriticalSection(fSection);
       fLocked := true;
-      if Index>PaddingMaxUsedIndex then
-        PaddingMaxUsedIndex := Index;
+      if Index>=PaddingUsedCount then
+        PaddingUsedCount := Index+1;
       with Padding[index] do begin
-        if VType<>varUnknown then begin
+        if not(VType in SYNLOCKER_VTYPENOCLEAR) then
           VarClear(PVariant(@VType)^);
-          VType := varUnknown;
-        end;
+        VType := varUnknown;
         VUnknown := Value;
       end;
     finally
@@ -51469,7 +51568,7 @@ end;
 function TSynLocker.GetUTF8(Index: integer): RawUTF8;
 var wasString: Boolean;
 begin
-  if (Index>=0) and (Index<=PaddingMaxUsedIndex) then
+  if cardinal(Index)<cardinal(PaddingUsedCount) then
     try
       EnterCriticalSection(fSection);
       fLocked := true;
@@ -51489,8 +51588,8 @@ begin
     try
       EnterCriticalSection(fSection);
       fLocked := true;
-      if Index>PaddingMaxUsedIndex then
-        PaddingMaxUsedIndex := Index;
+      if Index>=PaddingUsedCount then
+        PaddingUsedCount := Index+1;
       RawUTF8ToVariant(Value,Padding[Index],varString);
     finally
       fLocked := false;
@@ -51505,9 +51604,9 @@ begin
       EnterCriticalSection(fSection);
       fLocked := true;
       result := 0;
-      if Index<=PaddingMaxUsedIndex then
+      if Index<PaddingUsedCount then
         VariantToInt64(variant(Padding[index]),result) else
-        PaddingMaxUsedIndex := Index;
+        PaddingUsedCount := Index+1;
       variant(Padding[Index]) := Int64(result+Increment);
     finally
       fLocked := false;
@@ -51523,9 +51622,9 @@ begin
       EnterCriticalSection(fSection);
       fLocked := true;
       with Padding[index] do begin
-        if Index<=PaddingMaxUsedIndex then
+        if Index<PaddingUsedCount then
           result := PVariant(@VType)^ else begin
-          PaddingMaxUsedIndex := Index;
+          PaddingUsedCount := Index+1;
           VarClear(result);
         end;
         PVariant(@VType)^ := Value;
@@ -51544,13 +51643,13 @@ begin
       EnterCriticalSection(fSection);
       fLocked := true;
       with Padding[index] do begin
-        if Index<=PaddingMaxUsedIndex then
+        if Index<PaddingUsedCount then
           if VType=varUnknown then
             result := VUnknown else begin
             VarClear(PVariant(@VType)^);
             result := nil;
           end else begin
-          PaddingMaxUsedIndex := Index;
+          PaddingUsedCount := Index+1;
           result := nil;
         end;
         VType := varUnknown;
@@ -51971,7 +52070,7 @@ end;
 procedure TTextWriter.AddU(Value: cardinal);
 var tmp: array[0..23] of AnsiChar;
     P: PAnsiChar;
-    Len: integer;
+    Len: PtrInt;
 begin
   if BEnd-B<=24 then
     FlushToStream;
@@ -56197,6 +56296,7 @@ var len, n: integer;
     P: PByte;
     {$ifndef FPC}StdInputHandle: THandle;{$endif}
 begin
+  result := '';
   {$ifdef MSWINDOWS}
   {$ifndef FPC}StdInputHandle := GetStdHandle(STD_INPUT_HANDLE);{$endif}
   if not PeekNamedPipe(StdInputHandle,nil,0,nil,@len,nil) then
@@ -57968,7 +58068,7 @@ begin
   Len := DelimLen*(fCount-1);
   for i := 0 to fCount-1 do
     inc(Len,length(fList[i]));
-  SetLength(result,len);
+  FastSetString(result,nil,len);
   P := pointer(result);
   i := 0;
   repeat
@@ -58882,7 +58982,7 @@ begin
   fSafe.Padding[DIC_TIMECOUNT].VType := varInteger;
   fSafe.Padding[DIC_TIMESEC].VType := varInteger;
   fSafe.Padding[DIC_TIMETIX].VType := varInteger;
-  fSafe.PaddingMaxUsedIndex := DIC_TIMETIX;
+  fSafe.PaddingUsedCount := DIC_TIMETIX+1;
   fKeys.Init(aKeyTypeInfo,fSafe.Padding[DIC_KEY].VAny,nil,nil,nil,
     @fSafe.Padding[DIC_KEYCOUNT].VInteger,aKeyCaseInsensitive);
   if not Assigned(fKeys.fHashElement) then
@@ -61803,6 +61903,7 @@ var len: integer;
     R: PAnsiChar;
     crc: cardinal;
 begin
+  Finalize(result);
   if (self=nil) or (PlainLen=0) then
     exit;
   crc := AlgoHash(0,Plain,PlainLen);
@@ -62980,7 +63081,9 @@ end;
 {$ifdef CPUINTEL}
 procedure TestIntelCpuFeatures;
 var regs: TRegisters;
+    c: cardinal;
 begin
+  // retrieve CPUID raw flags
   regs.edx := 0;
   regs.ecx := 0;
   GetCPUID(1,regs);
@@ -62995,6 +63098,22 @@ begin
   Exclude(CpuFeatures, cfSSE42);
   Exclude(CpuFeatures, cfAESNI);
   {$endif}
+  // validate accuracy of most used HW opcodes
+  if cfRAND in CpuFeatures then
+    try
+      c := RdRand32;
+      if RdRand32=c then // most probably a RDRAND bug, e.g. on AMD Rizen 3000
+        exclude(CpuFeatures,cfRAND);
+    except // may trigger an illegal instruction exception on some Ivy Bridge
+      exclude(CpuFeatures,cfRAND);
+    end;
+  if cfSSE42 in CpuFeatures then
+    try
+      if crc32cBy4SSE42(0,1)<>3712330424 then
+        raise ESynException.Create('Invalid crc32cBy4SSE42');
+    except // disable now on illegal instruction or incorrect result
+      exclude(CpuFeatures,cfSSE42);
+    end;
 end;
 {$endif CPUINTEL}
 
@@ -63192,6 +63311,13 @@ initialization
   {$ifndef HASINLINE}
   PosEx := @PosExPas;
   {$endif}
+  PosExString := @PosExStringPas; // fast pure pascal process
+  {$else}
+  {$ifdef UNICODE}
+  PosExString := @PosExStringPas; // fast PWideChar process
+  {$else}
+  PosExString := @PosEx; // use optimized PAnsiChar asm
+  {$endif}
   {$endif}
   crc32c := @crc32cfast; // now to circumvent Internal Error C11715 for Delphi 5
   crc32cBy4 := @crc32cBy4fast;
@@ -63238,6 +63364,7 @@ initialization
   Assert(SizeOf(TFileTime)=SizeOf(Int64)); // see e.g. FileTimeToInt64
   {$endif}
   {$endif}
+  PosExstring('','');
 
 finalization
   GarbageCollectorFree;
