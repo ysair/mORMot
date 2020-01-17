@@ -4186,8 +4186,9 @@ type
   TJSONSerializerSQLRecordOptions = set of TJSONSerializerSQLRecordOption;
 
   /// simple writer to a Stream, specialized for writing an object as JSON
-  // - resulting JSON content will be UTF-8 encoded
-  // - use an internal buffer, faster than string+string
+  // - override WriteObject() to use class RTTI process of this unit, and
+  // allow custom JSON serialization
+  // - this is the full-feature JSON serialization class
   TJSONSerializer = class(TJSONWriter)
   protected
     fSQLRecordOptions: TJSONSerializerSQLRecordOptions;
@@ -5900,6 +5901,8 @@ type
     // dedicated TSQLRestServerURIContext.RemoteIP/AuthenticationBearerToken
     function Header(UpperName: PAnsiChar): RawUTF8;
       {$ifdef HASINLINE}inline;{$endif}
+    /// wrap FindIniNameValue(pointer(InHead),UpperName) with a cache store
+    function HeaderOnce(var Store: RawUTF8; UpperName: PAnsiChar): RawUTF8;
   end;
 
   /// used to map set of parameters for a Client or Server method call
@@ -6186,13 +6189,14 @@ type
     function GetInput(const ParamName: RawUTF8): variant;
     function GetInputOrVoid(const ParamName: RawUTF8): variant;
     {$endif}
-    function GetInputNameIndex(const ParamName: RawUTF8): integer;
+    function GetInputNameIndex(const ParamName: RawUTF8): PtrInt;
     function GetInputExists(const ParamName: RawUTF8): Boolean;
     function GetInputInt(const ParamName: RawUTF8): Int64;
     function GetInputDouble(const ParamName: RawUTF8): Double;
-    function GetInputUTF8(const ParamName: RawUTF8): RawUTF8;
+    procedure GetInputByName(const ParamName,InputName: RawUTF8; var result: RawUTF8);
+    function GetInputUTF8(const ParamName: RawUTF8): RawUTF8; {$ifdef HASINLINE}inline;{$endif}
     function GetInputString(const ParamName: RawUTF8): string;
-    function GetInputIntOrVoid(const ParamName: RawUTF8): Int64;
+    function GetInputIntOrVoid(const ParamName: RawUTF8): Int64; {$ifdef HASINLINE}inline;{$endif}
     function GetInputHexaOrVoid(const ParamName: RawUTF8): cardinal;
     function GetInputDoubleOrVoid(const ParamName: RawUTF8): Double;
     function GetInputUTF8OrVoid(const ParamName: RawUTF8): RawUTF8;
@@ -6201,10 +6205,10 @@ type
     procedure RetrieveCookies;
     function GetInCookie(CookieName: RawUTF8): RawUTF8;
     procedure SetInCookie(CookieName, CookieValue: RawUTF8);
-    function GetUserAgent: RawUTF8;
-    function GetRemoteIP: RawUTF8;
-    function GetRemoteIPNotLocal: RawUTF8;
-    function GetRemoteIPIsLocalHost: boolean;
+    function GetUserAgent: RawUTF8; {$ifdef HASINLINE}inline;{$endif}
+    function GetRemoteIP: RawUTF8;  {$ifdef HASINLINE}inline;{$endif}
+    function GetRemoteIPNotLocal: RawUTF8; {$ifdef HASINLINE}inline;{$endif}
+    function GetRemoteIPIsLocalHost: boolean; {$ifdef HASINLINE}inline;{$endif}
     function GetResourceFileName: TFileName;
     procedure SetOutSetCookie(aOutSetCookie: RawUTF8);
     procedure ServiceResultStart(WR: TTextWriter); virtual;
@@ -7365,7 +7369,9 @@ type
     // - by default, create indexes for all TRecordReference properties, and
     // for all TSQLRecord inherited properties (i.e. of sftID type, that is
     // an INTEGER field containing the ID of the pointing record)
-    // - the options specified at CreateMissingTables() are passed to this method
+    // - the options specified at CreateMissingTables() are passed to this method,
+    // within the context of an opened DB transaction, in which missing tables
+    // and fields have already been added
     // - is not part of TSQLRecordProperties because has been declared as virtual
     class procedure InitializeTable(Server: TSQLRestServer; const FieldName: RawUTF8;
       Options: TSQLInitializeTableOptions); virtual;
@@ -11280,7 +11286,7 @@ type
     // be serialized using ObjectToJSONDebug(), or this property will be left
     // to its default nil content if no exception occurred
     property ExecutedInstancesFailed: TRawUTF8DynArray read fExecutedInstancesFailed;
-    /// allow to use an instance-specific temporary TTextWriter
+    /// allow to use an instance-specific temporary TJSONSerializer
     function TempTextWriter: TJSONSerializer;
   end;
 
@@ -13855,6 +13861,8 @@ type
 
   /// optimized thread-safe storage of a list of IP v4 adresses
   //  - can be used e.g. as white-list or black-list of clients
+  //  - will use internally a sorted list of 32-bit integers for fast lookup
+  //  - with optional binary persistence
   TIPBan = class(TSynPersistentStore)
   protected
     fIP4: TIntegerDynArray;
@@ -23819,7 +23827,8 @@ type
   TObjArraySerializer = class(TPointerClassHashed)
   protected
     procedure DefaultCustomWriter(const aWriter: TTextWriter; const aValue);
-    function DefaultCustomReader(P: PUTF8Char; var aValue; out aValid: Boolean): PUTF8Char;
+    function DefaultCustomReader(P: PUTF8Char; var aValue; out aValid: Boolean{$ifndef NOVARIANTS};
+      CustomVariantOptions: PDocVariantOptions{$endif}): PUTF8Char;
   public
     Instance: TClassInstance;
     CustomReader: TDynArrayJSONCustomReader;
@@ -23865,7 +23874,7 @@ begin
 end;
 
 function TObjArraySerializer.DefaultCustomReader(P: PUTF8Char; var aValue;
-  out aValid: Boolean): PUTF8Char;
+  out aValid: Boolean{$ifndef NOVARIANTS}; CustomVariantOptions: PDocVariantOptions{$endif}): PUTF8Char;
 begin
   if TObject(aValue)=nil then
     TObject(aValue) := Instance.CreateNew;
@@ -24613,7 +24622,7 @@ begin
   if TVarData(Source).VType=varString then
     {$ifdef FPC}Move{$else}MoveFast{$endif}(
       TVarData(Source).VAny^,GetFieldAddr(Instance)^,fRecordSize) else
-    {$ifdef FPC}FillChar{$else}FillCharFast{$endif}(GetFieldAddr(Instance)^,fRecordSize,0);
+    FillCharFast(GetFieldAddr(Instance)^,fRecordSize,0);
 end;
 {$endif NOVARIANTS}
 
@@ -24646,7 +24655,7 @@ end;
 function TSQLPropInfoRecordFixedSize.SetBinary(Instance: TObject; P: PAnsiChar): PAnsiChar;
 begin
   if P=nil then
-    {$ifdef FPC}FillChar{$else}FillCharFast{$endif}(GetFieldAddr(Instance)^,fRecordSize,0) else
+    FillCharFast(GetFieldAddr(Instance)^,fRecordSize,0) else
     {$ifdef FPC}Move{$else}MoveFast{$endif}(P^,GetFieldAddr(Instance)^,fRecordSize);
   result := P+fRecordSize;
 end;
@@ -24658,7 +24667,7 @@ begin
   TextToBinary(Value,data);
   Value := pointer(data);
   if Value=nil then
-    {$ifdef FPC}FillChar{$else}FillCharFast{$endif}(GetFieldAddr(Instance)^,fRecordSize,0) else
+    FillCharFast(GetFieldAddr(Instance)^,fRecordSize,0) else
     {$ifdef FPC}Move{$else}MoveFast{$endif}(Value^,GetFieldAddr(Instance)^,fRecordSize);
 end;
 
@@ -24793,7 +24802,7 @@ begin
     Value := pointer(tmp);
   end;
   fCustomParser.ReadOneLevel(Value,Data,
-    [soReadIgnoreUnknownFields,soCustomVariantCopiedByReference]);
+    [soReadIgnoreUnknownFields,soCustomVariantCopiedByReference],nil);
 end;
 
 
@@ -25655,7 +25664,7 @@ begin
   end;
   assert(n-1=fRowCount);
   // recalcultate Bits[]
-  {$ifdef FPC}FillChar{$else}FillCharFast{$endif}(Bits,(fRowCount shr 3)+1,0);
+  FillCharFast(Bits,(fRowCount shr 3)+1,0);
   for i := 0 to nSet-1 do
     SetBitPtr(@Bits,i); // slow but accurate
 end;
@@ -25775,10 +25784,10 @@ var i,FID: integer;
 //    AllID: : TIDDynArray;
 begin
   if length(IDs)=fRowCount then begin // all selected -> all bits set to 1
-    {$ifdef FPC}FillChar{$else}FillCharFast{$endif}(Bits,(fRowCount shr 3)+1,255);
+    FillCharFast(Bits,(fRowCount shr 3)+1,255);
     exit;
   end;
-  {$ifdef FPC}FillChar{$else}FillCharFast{$endif}(Bits,(fRowCount shr 3)+1,0);
+  FillCharFast(Bits,(fRowCount shr 3)+1,0);
   if IDs=nil then
     exit; // no selected -> all bits left to 0
   // we sort IDs to use FastFindIntegerSorted() and its O(log(n)) binary search
@@ -26763,11 +26772,11 @@ const FIELDTYPE_TOXML: array[TSQLDBFieldType] of RawUTF8 = (
      '','',' dt:type="i8"',' dt:type="float"',' dt:type="number" rs:dbtype="currency"',
   // ftDate, ftUTF8, ftBlob
      ' dt:type="dateTime"',' dt:type="string"',' dt:type="bin.hex"');
-var W: TJSONWriter;
+var W: TTextWriter;
     f,r: integer;
     U: PPUTF8Char;
 begin
-  W := TJSONWriter.Create(Dest,16384);
+  W := TTextWriter.Create(Dest,32768);
   try
     W.AddShort('<xml xmlns:s="uuid:BDC6E3F0-6DA3-11d1-A2A3-00AA00C14882" '+
       'xmlns:dt="uuid:C2F41010-65B3-11d1-A29F-00AA00C14882" '+
@@ -28661,8 +28670,7 @@ var FN: PUTF8Char;
 begin
   FieldCount := 0;
   DecodedRowID := 0;
-  {$ifdef FPC}FillChar{$else}FillCharFast{$endif}(
-    FieldTypeApproximation,SizeOf(FieldTypeApproximation),ord(ftaNumber{TID}));
+  FillCharFast(FieldTypeApproximation,SizeOf(FieldTypeApproximation),ord(ftaNumber{TID}));
   InlinedParams := Params;
   if pointer(Fields)=nil then begin
     // get "COL1"="VAL1" pairs, stopping at '}' or ']'
@@ -28899,8 +28907,8 @@ procedure TJSONObjectDecoder.AddFieldValue(const FieldName,FieldValue: RawUTF8;
   FieldType: TJSONObjectDecoderFieldType);
 begin
   if FieldCount=MAX_SQLFIELDS then
-    raise EParsingException.CreateUTF8(
-      'Too many fields for TJSONObjectDecoder.AddField(%)',[FieldName]);
+    raise EParsingException.CreateUTF8('Too many fields for TJSONObjectDecoder.AddField(%) max=%',
+      [FieldName,MAX_SQLFIELDS]);
   FieldNames[FieldCount] := FieldName;
   FieldValues[FieldCount] := FieldValue;
   FieldTypeApproximation[FieldCount] := FieldType;
@@ -37717,7 +37725,7 @@ begin
 end;
 
 procedure TIPBan.SaveToWriter(aWriter: TFileBufferWriter);
-begin
+begin // wkSorted not efficient: too big diffs between IPs
   aWriter.WriteVarUInt32Array(fIP4, fCount, wkUInt32);
 end;
 
@@ -37799,7 +37807,7 @@ begin
   if fExecuting then begin
     endtix := SynCommons.GetTickCount64+maxMS;
     repeat
-      Sleep(1); // wait for InternalExecute to finish
+      SleepHiRes(1); // wait for InternalExecute to finish
     until not fExecuting or (SynCommons.GetTickCount64>=endtix);
   end;
 end;
@@ -37931,6 +37939,19 @@ end;
 function TSQLRestURIParams.Header(UpperName: PAnsiChar): RawUTF8;
 begin
   result := FindIniNameValue(pointer(InHead),UpperName);
+end;
+
+function TSQLRestURIParams.HeaderOnce(var Store: RawUTF8; UpperName: PAnsiChar): RawUTF8;
+begin
+  if (Store='') and (@self<>nil) then begin
+    result := FindIniNameValue(pointer(InHead),UpperName);
+    if result='' then
+      Store := NULL_STR_VAR else // ensure header is parsed only once
+      Store := result;
+  end else
+    if pointer(Store)=pointer(NULL_STR_VAR) then
+      result := '' else
+      result := Store;
 end;
 
 
@@ -41836,20 +41857,24 @@ end;
 
 function TSQLRestServerURIContext.GetInputInt(const ParamName: RawUTF8): Int64;
 var err: integer;
+    v: RawUTF8;
 begin
-  result := GetInt64(pointer(GetInputUTF8(ParamName)),err);
+  GetInputByName(ParamName,'Int',v);
+  result := GetInt64(pointer(v),err);
   if err<>0 then
-    raise EParsingException.CreateUTF8('%.GetInputInt(%): Invalid parameter',
-      [self,ParamName]);
+    raise EParsingException.CreateUTF8('%.InputInt[%]: "%" is not an integer',
+      [self,ParamName,v]);
 end;
 
 function TSQLRestServerURIContext.GetInputDouble(const ParamName: RawUTF8): double;
 var err: integer;
+    v: RawUTF8;
 begin
-  result := GetExtended(pointer(GetInputUTF8(ParamName)),err);
+  GetInputByName(ParamName,'Double',v);
+  result := GetExtended(pointer(v),err);
   if err<>0 then
-    raise EParsingException.CreateUTF8('%.GetInputDouble(%): Invalid parameter',
-      [self,ParamName]);
+    raise EParsingException.CreateUTF8('%.InputDouble[%]: "%" is not a float',
+      [self,ParamName,v]);
 end;
 
 function TSQLRestServerURIContext.GetInputIntOrVoid(const ParamName: RawUTF8): Int64;
@@ -41870,7 +41895,7 @@ begin
   result := GetExtended(pointer(GetInputUTF8OrVoid(ParamName)));
 end;
 
-function TSQLRestServerURIContext.GetInputNameIndex(const ParamName: RawUTF8): integer;
+function TSQLRestServerURIContext.GetInputNameIndex(const ParamName: RawUTF8): PtrInt;
 begin // fInput[0]='Param1',fInput[1]='Value1',fInput[2]='Param2'...
   if (fInput=nil) and (Parameters<>nil) then
     FillInput;
@@ -41880,17 +41905,23 @@ begin // fInput[0]='Param1',fInput[1]='Value1',fInput[2]='Param2'...
   result := -1;
 end;
 
-function TSQLRestServerURIContext.GetInputUTF8(const ParamName: RawUTF8): RawUTF8;
-var i: integer;
+procedure TSQLRestServerURIContext.GetInputByName(const ParamName,InputName: RawUTF8;
+  var result: RawUTF8);
+var i: PtrInt;
 begin
   i := GetInputNameIndex(ParamName);
   if i<0 then
-    raise EParsingException.CreateUTF8('%: missing ''%'' parameter',[self,ParamName]);
+    raise EParsingException.CreateUTF8('%: missing Input%[%]',[self,InputName,ParamName]);
   result := fInput[i*2+1];
 end;
 
+function TSQLRestServerURIContext.GetInputUTF8(const ParamName: RawUTF8): RawUTF8;
+begin
+  GetInputByName(ParamName,'UTF8',result);
+end;
+
 function TSQLRestServerURIContext.GetInputUTF8OrVoid(const ParamName: RawUTF8): RawUTF8;
-var i: integer;
+var i: PtrInt;
 begin
   i := GetInputNameIndex(ParamName);
   if i<0 then
@@ -41900,7 +41931,7 @@ end;
 
 function TSQLRestServerURIContext.InputUTF8OrDefault(
   const ParamName, DefaultValue: RawUTF8): RawUTF8;
-var i: integer;
+var i: PtrInt;
 begin
   i := GetInputNameIndex(ParamName);
   if i<0 then
@@ -41910,7 +41941,7 @@ end;
 
 function TSQLRestServerURIContext.InputUTF8OrError(const ParamName: RawUTF8;
   out Value: RawUTF8; const ErrorMessageForMissingParameter: string): boolean;
-var i: integer;
+var i: PtrInt;
 begin
   i := GetInputNameIndex(ParamName);
   if i<0 then begin
@@ -41948,16 +41979,16 @@ begin
 end;
 
 function TSQLRestServerURIContext.GetInputString(const ParamName: RawUTF8): string;
-var i: integer;
+var i: PtrInt;
 begin
   i := GetInputNameIndex(ParamName);
   if i<0 then
-    raise EParsingException.CreateUTF8('%: missing ''%'' parameter',[self,ParamName]);
+    raise EParsingException.CreateUTF8('%: missing InputString[%]',[self,ParamName]);
   result := UTF8ToString(fInput[i*2+1]);
 end;
 
 function TSQLRestServerURIContext.GetInputStringOrVoid(const ParamName: RawUTF8): string;
-var i: integer;
+var i: PtrInt;
 begin
   i := GetInputNameIndex(ParamName);
   if i<0 then
@@ -41973,8 +42004,10 @@ end;
 {$ifndef NOVARIANTS}
 
 function TSQLRestServerURIContext.GetInput(const ParamName: RawUTF8): variant;
+var v: RawUTF8;
 begin
-  GetVariantFromJSON(pointer(GetInputUTF8(ParamName)),false,Result);
+  GetInputByName(ParamName,'',v);
+  GetVariantFromJSON(pointer(v),false,Result);
 end;
 
 function TSQLRestServerURIContext.GetInputOrVoid(const ParamName: RawUTF8): variant;
@@ -41984,11 +42017,11 @@ end;
 
 function TSQLRestServerURIContext.InputOrError(const ParamName: RawUTF8;
   out Value: variant; const ErrorMessageForMissingParameter: string): boolean;
-var ValueUTF8: RawUTF8;
+var v: RawUTF8;
 begin
-  result := InputUTF8OrError(ParamName,ValueUTF8,ErrorMessageForMissingParameter);
+  result := InputUTF8OrError(ParamName,v,ErrorMessageForMissingParameter);
   if result then
-    GetVariantFromJSON(pointer(ValueUTF8),false,Value);
+    GetVariantFromJSON(pointer(v),false,Value);
 end;
 
 function TSQLRestServerURIContext.GetInputAsTDocVariant(const Options: TDocVariantOptions; 
@@ -42134,33 +42167,19 @@ begin
     fOutSetCookie := aOutSetCookie;
 end;
 
-function HeaderOnce(call: PSQLRestURIParams; var store: RawUTF8; upper: PAnsiChar): RawUTF8;
-  {$ifdef HASINLINE}inline;{$endif}
-begin
-  if (store='') and (call<>nil) then begin
-    result := FindIniNameValue(pointer(call^.InHead),upper);
-    if result='' then
-      store := NULL_STR_VAR else // ensure header is parsed only once
-      store := result;
-  end else
-    if pointer(store)=pointer(NULL_STR_VAR) then
-      result := '' else
-      result := store;
-end;
-
 function TSQLRestServerURIContext.GetUserAgent: RawUTF8;
 begin
-  result := HeaderOnce(Call,fUserAgent,'USER-AGENT: ');
+  result := Call^.HeaderOnce(fUserAgent,'USER-AGENT: ');
 end;
 
 function TSQLRestServerURIContext.GetRemoteIP: RawUTF8;
 begin
-  result := HeaderOnce(Call,fRemoteIP,HEADER_REMOTEIP_UPPER);
+  result := Call^.HeaderOnce(fRemoteIP,HEADER_REMOTEIP_UPPER);
 end;
 
 function TSQLRestServerURIContext.GetRemoteIPNotLocal: RawUTF8;
 begin
-  result := HeaderOnce(Call,fRemoteIP,HEADER_REMOTEIP_UPPER);
+  result := Call^.HeaderOnce(fRemoteIP,HEADER_REMOTEIP_UPPER);
   if result='127.0.0.1' then
     result := '';
 end;
@@ -42172,7 +42191,7 @@ end;
 
 function TSQLRestServerURIContext.AuthenticationBearerToken: RawUTF8;
 begin
-  result := HeaderOnce(Call,fAuthenticationBearerToken,HEADER_BEARER_UPPER);
+  result := Call^.HeaderOnce(fAuthenticationBearerToken,HEADER_BEARER_UPPER);
   if (result='') and not(rsoAuthenticationURIDisable in Server.Options) then begin
     result := GetInputUTF8OrVoid('authenticationbearer');
     if result<>'' then
@@ -44352,7 +44371,7 @@ begin
   RunningBatchTable := nil;
   RunningBatchURIMethod := mNone;
   Count := 0;
-  {$ifdef FPC}FillChar{$else}FillCharFast{$endif}(counts,SizeOf(counts),0);
+  FillCharFast(counts,SizeOf(counts),0);
   fAcquireExecution[execORMWrite].fSafe.Lock; // multi thread protection
   try // to protect automatic transactions and global write lock
   try // to protect InternalBatchStart/Stop locking
@@ -49759,14 +49778,14 @@ var temp: variant;
 begin
   if j2oHandleCustomVariants in Options then begin
     if j2oHandleCustomVariantsWithinString in Options then
-      opt := [dvoValueCopiedByReference,dvoJSONObjectParseWithinString] else
-      opt := [dvoValueCopiedByReference];
+      opt := [dvoValueCopiedByReference,dvoAllowDoubleValue,dvoJSONObjectParseWithinString] else
+      opt := [dvoValueCopiedByReference,dvoAllowDoubleValue];
     GetVariantFromJSON(PropValue,wasString,temp,@opt,false);
   end else
     GetVariantFromJSON(PropValue,wasString,temp,nil,false);
   P^.SetVariantProp(Value,temp);
 end;
-{$endif}
+{$endif NOVARIANTS}
 
 procedure TJSONToObject.HandleProperty(var tmp: RawUTF8);
 var V: PtrInt;
@@ -50968,7 +50987,7 @@ begin
   if FieldNames='' then
     Fields := fStoredClassRecordProps.SimpleFieldsBits[soUpdate] else
   if FieldNames='*' then
-    {$ifdef FPC}FillChar{$else}FillCharFast{$endif}(Fields,SizeOf(Fields),255) else
+    FillCharFast(Fields,SizeOf(Fields),255) else
     if not fStoredClassRecordProps.FieldBitsFromCSV(FieldNames,Fields) then begin
       result := false; // invalid FieldNames content
       exit;
@@ -53018,7 +53037,7 @@ begin
       aCtxt.Log.Log(sllUserAuth,
         'New "%" session %/% created at %/% running %',
         [User.GroupRights.Ident,User.LogonName,fIDCardinal,fRemoteIP,
-         aCtxt.Call^.LowLevelConnectionID,aCtxt.UserAgent],self);
+         aCtxt.Call^.LowLevelConnectionID,aCtxt.GetUserAgent],self);
       {$endif}
       exit; // create successfull
     end;
@@ -53144,7 +53163,7 @@ end;
 
 procedure TSQLAccessRights.FromString(P: PUTF8Char);
 begin
-  {$ifdef FPC}FillChar{$else}FillCharFast{$endif}(self,SizeOf(self),0);
+  FillCharFast(self,SizeOf(self),0);
   if P=nil then
     exit;
   AllowRemoteExecute := TSQLAllowRemoteExecute(byte(GetNextItemCardinal(P)));
@@ -53188,7 +53207,7 @@ end;
 function TSQLAuthGroup.GetSQLAccessRights: TSQLAccessRights;
 begin
   if self=nil then
-    {$ifdef FPC}FillChar{$else}FillCharFast{$endif}(result,SizeOf(result),0) else
+    FillCharFast(result,SizeOf(result),0) else
     result.FromString(pointer(AccessRights));
 end;
 
@@ -53289,7 +53308,7 @@ begin
     result := SHA256(TSQLAUTHUSER_SALT+aPasswordPlain) else begin
     PBKDF2_HMAC_SHA256(aPasswordPlain,aHashSalt,aHashRound,dig);
     result := SHA256DigestToString(dig);
-    {$ifdef FPC}FillChar{$else}FillCharFast{$endif}(dig,SizeOf(dig),0);
+    FillCharFast(dig,SizeOf(dig),0);
   end;
 end;
 
@@ -54293,7 +54312,7 @@ procedure TServiceContainer.SetInterfaceMethodBits(MethodNamesCSV: PUTF8Char;
 var i,n: integer;
     method: RawUTF8;
 begin
-  {$ifdef FPC}FillChar{$else}FillCharFast{$endif}(bits,SizeOf(bits),0);
+  FillCharFast(bits,SizeOf(bits),0);
   n := length(fListInterfaceMethod);
   if n>SizeOf(bits) shl 3 then
     raise EServiceException.CreateUTF8('%.SetInterfaceMethodBits: n=%',[self,n]);
@@ -54748,7 +54767,7 @@ begin
   _AddRef;
 end;
 
-procedure IgnoreComma(var P: PUTF8Char);
+procedure IgnoreComma(var P: PUTF8Char); {$ifdef HASINLINE}inline;{$endif}
 begin
   if P<>nil then begin
     while (P^<=' ') and (P^<>#0) do inc(P);
@@ -54793,8 +54812,7 @@ var method: PServiceMethod;
         include(Params.fCustomOptions,twoIgnoreDefaultInRecord);
       end else
         opt := [woDontStoreDefault];
-      {$ifdef FPC}FillChar{$else}FillCharFast{$endif}(
-        I64s,method^.ArgsUsedCount[smvv64]*SizeOf(Int64),0);
+      FillCharFast(I64s,method^.ArgsUsedCount[smvv64]*SizeOf(Int64),0);
       for arg := 1 to high(method^.Args) do
       with method^.Args[arg] do
       if ValueType>smvSelf then begin
@@ -55780,10 +55798,10 @@ procedure TInterfaceFactory.CheckMethodIndexes(const aMethodName: array of RawUT
 var i: integer;
 begin
   if aSetAllIfNone and (high(aMethodName)<0) then begin
-    {$ifdef FPC}FillChar{$else}FillCharFast{$endif}(aBits,SizeOf(aBits),255);
+    FillCharFast(aBits,SizeOf(aBits),255);
     exit;
   end;
-  {$ifdef FPC}FillChar{$else}FillCharFast{$endif}(aBits,SizeOf(aBits),0);
+  FillCharFast(aBits,SizeOf(aBits),0);
   for i := 0 to high(aMethodName) do
     include(aBits,CheckMethodIndex(aMethodName[i]));
 end;
@@ -56683,7 +56701,7 @@ begin
     if not EnQueue(AsynchBatchExecute,'free@',true) then
       exit;
     repeat
-      sleep(1); // wait for all batchs to be released
+      SleepHiRes(1); // wait for all batchs to be released
     until (fBackgroundBatch=nil) or (SynCommons.GetTickCount64>timeout);
     result := Disable(AsynchBatchExecute);
   end else begin
@@ -56691,7 +56709,7 @@ begin
     if (b<0) or not EnQueue(AsynchBatchExecute,'free@'+Table.SQLTableName,true) then
       exit;
     repeat
-      sleep(1); // wait for all pending rows to be sent
+      SleepHiRes(1); // wait for all pending rows to be sent
     until (fBackgroundBatch[b]=nil) or (SynCommons.GetTickCount64>timeout);
     if ObjArrayCount(fBackgroundBatch)>0 then
       result := true else begin
@@ -61483,14 +61501,12 @@ begin
       SetLength(fWideStrings,ArgsUsedCount[smvvWideString]);
     if fAlreadyExecuted then begin
       if ArgsUsedCount[smvvObject]>0 then
-        {$ifdef FPC}FillChar{$else}FillCharFast{$endif}(
+        FillCharFast(
           fObjects,ArgsUsedCount[smvvObject]*SizeOf(TObject),0);
       if ArgsUsedCount[smvv64]>0 then
-        {$ifdef FPC}FillChar{$else}FillCharFast{$endif}(
-          fInt64s,ArgsUsedCount[smvv64]*SizeOf(Int64),0);
+        FillCharFast(fInt64s,ArgsUsedCount[smvv64]*SizeOf(Int64),0);
       if ArgsUsedCount[smvvInterface]>0 then
-        {$ifdef FPC}FillChar{$else}FillCharFast{$endif}(
-          fInterfaces,ArgsUsedCount[smvvInterface]*SizeOf(pointer),0);
+        FillCharFast(fInterfaces,ArgsUsedCount[smvvInterface]*SizeOf(pointer),0);
     end;
     Value := @fValues[1];
     for a := 1 to high(Args) do
@@ -61513,8 +61529,7 @@ begin
       smvvRecord: begin
         Value^ := pointer(fRecords[IndexVar]);
         if fAlreadyExecuted then
-          {$ifdef FPC}FillChar{$else}FillCharFast{$endif}(
-            Value^^,ArgTypeInfo^.RecordType^.Size,0);
+          FillCharFast(Value^^,ArgTypeInfo^.RecordType^.Size,0);
       end;
       smvvDynArray:
         Value^ := @fDynArrays[IndexVar].Value;
@@ -61538,7 +61553,7 @@ var Value: pointer;
     call: TCallMethodArgs;
     Stack: packed array[0..MAX_EXECSTACK-1] of byte;
 begin
-  {$ifdef FPC}FillChar{$else}FillCharFast{$endif}(call,SizeOf(call),0);
+  FillCharFast(call,SizeOf(call),0);
   with fMethod^ do begin
     // create the stack and register content
     {$ifdef CPUX86}
@@ -61815,8 +61830,7 @@ begin
         repeat inc(Par) until not(Par^ in [#1..' ']);
         if Par<>'}' then begin
           ParObjValuesUsed := true;
-          {$ifdef FPC}FillChar{$else}FillCharFast{$endif}(
-            ParObjValues,(ArgsInLast+1)*SizeOf(pointer),0); // := nil
+          FillCharFast(ParObjValues,(ArgsInLast+1)*SizeOf(pointer),0); // := nil
           a1 := ArgsInFirst;
           repeat
             Name := GetJSONPropName(Par,@NameLen);
@@ -62200,7 +62214,7 @@ begin
     if fBatch<>nil then begin
       timeOut := GetTickCount64+2000;
       repeat
-        sleep(1); // allow 2 seconds to process all pending frames
+        SleepHiRes(1); // allow 2 seconds to process all pending frames
         if fBatch=nil then
           exit;
       until GetTickCount64>timeOut;
@@ -62662,7 +62676,7 @@ begin
   {$endif}
   timeOut := GetTickCount64+aTimeOutSeconds*1000;
   repeat
-    Sleep(5);
+    SleepHiRes(5);
     if SendNotificationsPending=0 then
       exit;
   until GetTickCount64>timeOut;
@@ -63013,7 +63027,7 @@ initialization
   StatusCodeToErrorMessage := StatusCodeToErrorMsgBasic;
   GarbageCollectorFreeAndNil(JSONCustomParsers,TSynDictionary.Create(
     TypeInfo(TClassDynArray),TypeInfo(TJSONCustomParsers)));
-  TTextWriter.SetDefaultJSONClass(TJSONSerializer);
+  DefaultTextWriterSerializer := TJSONSerializer;
   TJSONSerializer.RegisterObjArrayForJSON(
     [TypeInfo(TSQLModelRecordPropertiesObjArray),TSQLModelRecordProperties]);
   TJSONSerializer.RegisterCustomJSONSerializerFromText(
