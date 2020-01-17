@@ -1015,6 +1015,9 @@ type
     procedure WebsocketsJSONProtocol;
     /// low-level test of our 'synopsebinary' WebSockets binary protocol
     procedure WebsocketsBinaryProtocol;
+    procedure WebsocketsBinaryProtocolEncrypted;
+    procedure WebsocketsBinaryProtocolCompressed;
+    procedure WebsocketsBinaryProtocolCompressEncrypted;
     /// launch the WebSockets-ready HTTP server
     procedure RunHttpServer;
     /// test the callback mechanism via interface-based services on server side
@@ -1310,7 +1313,8 @@ type
       aAsJSONObject: boolean; {$ifndef LVCL}aRunInOtherThread: boolean=false;{$endif}
       aOptions: TServiceMethodOptions=[]);
     procedure ClientAlgo(algo: TSQLRestServerAuthenticationSignedURIAlgo);
-    class function CustomReader(P: PUTF8Char; var aValue; out aValid: Boolean): PUTF8Char;
+    class function CustomReader(P: PUTF8Char; var aValue; out aValid: Boolean{$ifndef NOVARIANTS};
+      CustomVariantOptions: PDocVariantOptions{$endif}): PUTF8Char;
     class procedure CustomWriter(const aWriter: TTextWriter; const aValue);
     procedure SetOptions(aAsJSONObject: boolean;
       aOptions: TServiceMethodOptions);
@@ -4338,6 +4342,12 @@ procedure TTestLowLevelCommon._UTF8;
     Check(C.RawUnicodeToAnsi(C.AnsiToRawUnicode(W))=W);
     {$endif}
   end;
+  procedure tc(const S: RawUTF8; start,count: PtrInt);
+  var t: RawUTF8;
+  begin
+    trimcopy(s,start,count,t);
+    checkEqual(t,trim(copy(s,start,count)));
+  end;
 var i, j, k, len, lenup100, CP, L: integer;
     W: WinAnsiString;
     WS: WideString;
@@ -4685,6 +4695,28 @@ begin
   Check(StringReplaceAll('abcabcabc','bc','B')='aBaBaB');
   Check(StringReplaceAll('abcabcabc','bc','bcd')='abcdabcdabcd');
   Check(StringReplaceAll('abcabcabc','c','C')='abCabCabC');
+  for i := -10 to 50 do
+    for j := -10 to 50 do begin
+      tc('',i,j);
+      tc('1',i,j);
+      tc('1 ',i,j);
+      tc(' 1',i,j);
+      tc('   1',i,j);
+      tc('1   ',i,j);
+      tc('1',i,j);
+      tc('12',i,j);
+      tc('123',i,j);
+      tc(' 234',i,j);
+      tc(' 234 ',i,j);
+      tc(' 2 4',i,j);
+      tc(' 2 4 ',i,j);
+      tc('  3    ',i,j);
+      tc('  3   7  ',i,j);
+      tc(' 234 6',i,j);
+      tc('234 67 ',i,j);
+      tc(' 234 67 ',i,j);
+      tc(' 234 67 ',i,maxInt);
+    end;
 end;
 
 procedure TTestLowLevelCommon.Iso8601DateAndTime;
@@ -6756,11 +6788,11 @@ type
     fInts: TIntegerDynArray;
     fTimeLog: TTimeLogDynArray;
     fFileVersions: TFVs;
-    class function FVReader(P: PUTF8Char; var aValue;
-      out aValid: Boolean): PUTF8Char;
+    class function FVReader(P: PUTF8Char; var aValue; out aValid: Boolean
+      {$ifndef NOVARIANTS}; CustomVariantOptions: PDocVariantOptions{$endif}): PUTF8Char;
     class procedure FVWriter(const aWriter: TTextWriter; const aValue);
-    class function FVReader2(P: PUTF8Char; var aValue;
-      out aValid: Boolean): PUTF8Char;
+    class function FVReader2(P: PUTF8Char; var aValue; out aValid: Boolean
+      {$ifndef NOVARIANTS}; CustomVariantOptions: PDocVariantOptions{$endif}): PUTF8Char;
     class procedure FVWriter2(const aWriter: TTextWriter; const aValue);
     class function FVClassReader(const aValue: TObject; aFrom: PUTF8Char;
       var aValid: Boolean; aOptions: TJSONToObjectOptions): PUTF8Char;
@@ -6776,7 +6808,7 @@ type
 { TCollTstDynArray}
 
 class function TCollTstDynArray.FVReader(P: PUTF8Char; var aValue;
-  out aValid: Boolean): PUTF8Char;
+  out aValid: Boolean{$ifndef NOVARIANTS}; CustomVariantOptions: PDocVariantOptions{$endif}): PUTF8Char;
 var V: TFV absolute aValue;
 begin // '[1,2001,3001,4001,"1","1001"],[2,2002,3002,4002,"2","1002"],...'
   aValid := false;
@@ -6804,7 +6836,7 @@ begin
 end;
 
 class function TCollTstDynArray.FVReader2(P: PUTF8Char; var aValue;
-  out aValid: Boolean): PUTF8Char;
+  out aValid: Boolean{$ifndef NOVARIANTS}; CustomVariantOptions: PDocVariantOptions{$endif}): PUTF8Char;
 var V: TFV absolute aValue;
     Values: array[0..5] of TValuePUTF8Char;
 begin // '{"Major":1,"Minor":2001,"Release":3001,"Build":4001,"Main":"1","Detailed":"1001"},..
@@ -8434,6 +8466,12 @@ begin
   CheckEqual(HtmlEscapeWiki('https://test'),'<p><a href="https://test" rel="nofollow">https://test</a></p>');
   CheckEqual(HtmlEscapeWiki('test'#13#10'click on http://coucouc.net toto'),
     '<p>test</p><p>click on <a href="http://coucouc.net" rel="nofollow">http://coucouc.net</a> toto</p>');
+  CheckEqual(HtmlEscapeWiki(':test: :) joy:'),'<p>:test: '+EMOJI_UTF8[eSmiley]+' joy:</p>');
+  CheckEqual(HtmlEscapeWiki(':innocent: smile'),'<p>'+EMOJI_UTF8[eInnocent]+' smile</p>');
+  CheckEqual(HtmlEscapeWiki(':test: :) a:joy:'),'<p>:test: '+EMOJI_UTF8[eSmiley]+' a:joy:</p>');
+  CheckEqual(HtmlEscapeWiki(':test: :)'),'<p>:test: '+EMOJI_UTF8[eSmiley]+'</p>');
+  CheckEqual(HtmlEscapeWiki(':test: (:)'),'<p>:test: (:)</p>');
+  CheckEqual(HtmlEscapeWiki(':test: :))'),'<p>:test: :))</p>');
   // Markdown
   CheckEqual(HtmlEscapeMarkdown('test'),'<p>test</p>');
   CheckEqual(HtmlEscapeMarkdown('test'#13#10'toto'),'<p>test toto</p>');
@@ -8441,7 +8479,7 @@ begin
   CheckEqual(HtmlEscapeMarkdown('test'#10#10'toto'),'<p>test</p><p>toto</p>');
   CheckEqual(HtmlEscapeMarkdown('test'#10#10#10'toto'),'<p>test</p><p> toto</p>');
   CheckEqual(HtmlEscapeMarkdown('te<b>st'),'<p>te<b>st</p>');
-  CheckEqual(HtmlEscapeMarkdown('te<b>st',hfOutsideAttributes),'<p>te&lt;b&gt;st</p>');
+  CheckEqual(HtmlEscapeMarkdown('te<b>st',[heHtmlEscape]),'<p>te&lt;b&gt;st</p>');
   CheckEqual(HtmlEscapeMarkdown('t *e* st'),'<p>t <em>e</em> st</p>');
   CheckEqual(HtmlEscapeMarkdown('t*e*st'),'<p>t<em>e</em>st</p>');
   CheckEqual(HtmlEscapeMarkdown('t\*e\*st'),'<p>t*e*st</p>');
@@ -8481,6 +8519,10 @@ begin
     '<p>>test</p><blockquote><p>quote</p></blockquote>');
   CheckEqual(HtmlEscapeMarkdown('>test'#13#10'> quote1'#10'> quote2'#13#10'end'),
     '<p>>test</p><blockquote><p>quote1</p><p>quote2</p></blockquote><p>end</p>');
+  CheckEqual(HtmlEscapeMarkdown(':test: :) joy:'),'<p>:test: '+EMOJI_UTF8[eSmiley]+' joy:</p>');
+  CheckEqual(HtmlEscapeMarkdown(':innocent: :joy'),'<p>'+EMOJI_UTF8[eInnocent]+' :joy</p>');
+  CheckEqual(HtmlEscapeMarkdown(':test: :)'),'<p>:test: '+EMOJI_UTF8[eSmiley]+'</p>');
+  CheckEqual(HtmlEscapeMarkdown(':test: (:)'),'<p>:test: (:)</p>');
 end;
 
 {$ifndef DELPHI5OROLDER}
@@ -9454,7 +9496,49 @@ var i: Integer;
     astext: boolean;
     P: PUTF8Char;
     eoo: AnsiChar;
+    e: TEmoji;
 begin
+  check(EMOJI_UTF8[eNone]='');
+  checkEqual(BinToHex(EMOJI_UTF8[eGrinning]),'F09F9880');
+  checkEqual(BinToHex(EMOJI_UTF8[ePray]),'F09F998F');
+  check(EmojiFromText(Pointer(EMOJI_UTF8[eGrinning]),4)=eNone);
+  check(EmojiFromText(nil,0)=eNone);
+  checkEqual(EmojiToDots('toto'),'toto');
+  for e := low(e) to high(e) do begin
+    check(EmojiFromText(pointer(EMOJI_TEXT[e]),length(EMOJI_TEXT[e]))=e);
+    if e=eNone then
+      continue;
+    check(length(EMOJI_UTF8[e])=4);
+    P := Pointer(EMOJI_UTF8[e]);
+    checkEqual(NextUTF8UCS4(P),$1f5ff+ord(e));
+    FormatUTF8(':smile % ok',[EMOJI_TAG[e]],tmp);
+    P := pointer(tmp);
+    check(EmojiParseDots(P)=eNone);
+    check(IdemPChar(P,'SMILE :'));
+    inc(P,6);
+    check(P^=':');
+    check(EmojiParseDots(P)=e);
+    check(IdemPChar(P,' OK'));
+    checkEqual(EmojiToDots(EMOJI_UTF8[e]),EMOJI_TAG[e]);
+    checkEqual(EmojiToDots(' '+EMOJI_UTF8[e]+' '),' '+EMOJI_TAG[e]+' ');
+    checkEqual(EmojiToDots(EmojiFromDots(tmp)),tmp);
+  end;
+  tmp := ':) :( :JoY: :o :|';
+  P := pointer(tmp);
+  check(EmojiParseDots(P)=eSmiley);
+  check(P^=' ');
+  inc(P);
+  check(EmojiParseDots(P)=eFrowning);
+  check(IdemPChar(P,' :JOY:'));
+  inc(P);
+  check(EmojiParseDots(P)=eJoy);
+  check(P^=' ');
+  inc(P);
+  check(EmojiParseDots(P)=eOpen_mouth);
+  check(P^=' ');
+  inc(P);
+  check(EmojiParseDots(P)=eExpressionless);
+  check(P^=#0);
   with PTypeInfo(TypeInfo(TSynLogInfo))^.EnumBaseType^ do
     for i := 0 to integer(high(TSynLogInfo)) do begin
 {$ifdef VERBOSE}writeln(i,' ',GetEnumName(i)^, ' ',GetEnumNameTrimed(i));{$endif}
@@ -17895,7 +17979,8 @@ begin
 end;
 
 class function TTestServiceOrientedArchitecture.CustomReader(P: PUTF8Char;
-  var aValue; out aValid: Boolean): PUTF8Char;
+  var aValue; out aValid: Boolean{$ifndef NOVARIANTS};
+  CustomVariantOptions: PDocVariantOptions{$endif}): PUTF8Char;
 var V: TSQLRestCacheEntryValue absolute aValue;
     Values: array[0..2] of TValuePUTF8Char;
 begin // {"ID":1786554763,"Timestamp":323618765,"JSON":"D:\\TestSQL3.exe"}
@@ -18581,7 +18666,7 @@ end;
 
 procedure TTestMultiThreadProcess.Locked;
 begin // 1=7310/s  2=8689/s  5=7693/s  10=3893/s  30=1295/s  50=777/s
-  // (numbers below are taken from a Xeon Phi 2 @ 1.5GHz with 288 cores)
+  // (numbers are taken from a Xeon Phi 2 @ 1.5GHz with 288 cores)
   Test(TSQLRestClientDB,HTTP_DEFAULT_MODE,amLocked);
 end;
 
@@ -18682,7 +18767,7 @@ begin
     while not Terminated do
     case FixedWaitFor(fEvent,INFINITE) of
       wrSignaled:
-        if fProcessFinished then // from Destroy
+        if Terminated or fProcessFinished then // from Destroy
           break else
           try
             try
@@ -18743,17 +18828,28 @@ end;
 
 { TTestBidirectionalRemoteConnection }
 
-procedure TTestBidirectionalRemoteConnection.WebsocketsBinaryProtocol;
-begin
-  WebsocketsLowLevel(TWebSocketProtocolBinary.Create('',false,''),focBinary);
-  WebsocketsLowLevel(TWebSocketProtocolBinary.Create('',false,'pass'),focBinary);
-  WebsocketsLowLevel(TWebSocketProtocolBinary.Create('',false,'',true),focBinary);
-  WebsocketsLowLevel(TWebSocketProtocolBinary.Create('',false,'pass',true),focBinary);
-end;
-
 procedure TTestBidirectionalRemoteConnection.WebsocketsJSONProtocol;
 begin
   WebsocketsLowLevel(TWebSocketProtocolJSON.Create(''),focText);
+end;
+
+procedure TTestBidirectionalRemoteConnection.WebsocketsBinaryProtocol;
+begin
+  WebsocketsLowLevel(TWebSocketProtocolBinary.Create('',false,'',false),focBinary);
+end;
+procedure TTestBidirectionalRemoteConnection.WebsocketsBinaryProtocolEncrypted;
+begin
+  WebsocketsLowLevel(TWebSocketProtocolBinary.Create('',false,'pass',false),focBinary);
+end;
+
+procedure TTestBidirectionalRemoteConnection.WebsocketsBinaryProtocolCompressed;
+begin
+  WebsocketsLowLevel(TWebSocketProtocolBinary.Create('',false,'',true),focBinary);
+end;
+
+procedure TTestBidirectionalRemoteConnection.WebsocketsBinaryProtocolCompressEncrypted;
+begin
+  WebsocketsLowLevel(TWebSocketProtocolBinary.Create('',false,'pass',true),focBinary);
 end;
 
 type // to access protected low-level frame methods
