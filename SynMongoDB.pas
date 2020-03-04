@@ -33,7 +33,6 @@ unit SynMongoDB;
   - Sabbiolina
   - Zed
 
-
   Alternatively, the contents of this file may be used under the terms of
   either the GNU General Public License Version 2 or later (the "GPL"), or
   the GNU Lesser General Public License Version 2.1 or later (the "LGPL"),
@@ -48,16 +47,10 @@ unit SynMongoDB;
 
   ***** END LICENSE BLOCK *****
 
-  Version 1.18
-  - first public release, corresponding to mORMot Framework 1.18
-    and feature request [0fee1d995c]
-
-
   TODO:
   - handle BULK commands support for MongoDB >=2.6 for faster writes
     see http://blog.mongodb.org/post/84922794768
-  - GridFS support
-
+  - GridFS support ?
 
 }
 
@@ -86,7 +79,6 @@ uses
   SynLog;
 
 
-
 { ************ BSON (Binary JSON) process }
 
 type
@@ -96,8 +88,9 @@ type
   TDecimal128Bits = record
     case integer of
     0: (lo, hi: QWord);
-    1: (b: array[0..15] of byte);
-    2: (c: array[0..3] of cardinal);
+    1: (l, h: Int64);
+    2: (b: array[0..15] of byte);
+    3: (c: array[0..3] of cardinal);
   end;
   /// points to a 128-bit decimal binary
   PDecimal128Bits = ^TDecimal128Bits;
@@ -957,7 +950,7 @@ function BSONFieldSelector(const FieldNamesCSV: RawUTF8): TBSONDocument; overloa
 // - will create the BSON binary without any temporary TDocVariant storage, by
 // calling JSONBufferToBSONDocument() on a temporary copy of the supplied JSON
 function BSON(const JSON: RawUTF8; kind: PBSONElementType=nil): TBSONDocument; overload;
-  {$ifdef HASINLINE}inline;{$endif}
+  {$ifndef ISDELPHI20092010}{$ifdef HASINLINE}inline;{$endif}{$endif}
 
 /// store some object content, supplied as (extended) JSON and parameters,
 // into BSON encoded binary
@@ -1909,7 +1902,7 @@ type
   TMongoClient = class
   protected
     fConnectionString: RawUTF8;
-    fDatabases: TRawUTF8ListHashed;
+    fDatabases: TRawUTF8List;
     fConnections: TMongoConnectionDynArray;
     fReadPreference: TMongoClientReplicaSetReadPreference;
     fWriteConcern: TMongoClientWriteConcern;
@@ -2053,7 +2046,7 @@ type
   protected
     fClient: TMongoClient;
     fName: RawUTF8;
-    fCollections: TRawUTF8ListHashed;
+    fCollections: TRawUTF8List;
     function GetCollection(const Name: RawUTF8): TMongoCollection;
     function GetCollectionOrCreate(const Name: RawUTF8): TMongoCollection;
     function GetCollectionOrNil(const Name: RawUTF8): TMongoCollection;
@@ -3203,7 +3196,7 @@ begin
           W.AddNoJSONEscape(item.Name,item.NameLen);
           W.Add(':');
         end else
-          W.AddFieldName(item.Name,item.NameLen);
+          W.AddProp(item.Name,item.NameLen);
         item.AddMongoJSON(W,Mode);
         W.Add(',');
       end;
@@ -3386,11 +3379,11 @@ begin
 end;
 
 procedure TBSONWriter.BSONWriteDateTime(const name: RawUTF8; const value: TDateTime);
-var UnixTime: TUnixMSTime;
+var ms: TUnixMSTime;
 begin
-  UnixTime := DateTimeToUnixMSTime(value);
+  ms := DateTimeToUnixMSTime(value);
   BSONWrite(name,betDateTime);
-  Write8(UnixTime);
+  Write8(ms);
 end;
 
 procedure TBSONWriter.BSONWrite(const name: RawUTF8; Data: pointer; DataLen: integer);
@@ -5649,7 +5642,7 @@ begin
       fConnectionString := FormatUTF8('%,%:%',[fConnectionString,secHost[i],Port]);
     end;
   end;
-  fDatabases := TRawUTF8ListHashed.Create(true);
+  fDatabases := TRawUTF8List.Create([fObjectsOwned,fNoDuplicate,fCaseSensitive]);
 end;
 
 destructor TMongoClient.Destroy;
@@ -5735,14 +5728,14 @@ function TMongoClient.Open(const DatabaseName: RawUTF8): TMongoDatabase;
 begin
   if self=nil then
     result := nil else begin
-    result := TMongoDatabase(fDatabases.GetObjectByName(DatabaseName));
+    result := fDatabases.GetObjectFrom(DatabaseName);
     if result=nil then begin // not already opened -> try now from primary host
       if not fConnections[0].Opened then begin
         fConnections[0].Open;
         AfterOpen;
       end;
       result := TMongoDatabase.Create(Self,DatabaseName);
-      fDatabases.AddObject(DatabaseName,result);
+      fDatabases.AddObjectUnique(DatabaseName,@result);
     end;
   end;
 end;
@@ -5758,7 +5751,7 @@ var digest: RawByteString;
 begin
   if (self=nil) or (DatabaseName='') or (UserName='') or (PassWord='') then
     raise EMongoException.CreateUTF8('Invalid %.OpenAuth("%") call',[self,DatabaseName]);
-  result := TMongoDatabase(fDatabases.GetObjectByName(DatabaseName));
+  result := fDatabases.GetObjectFrom(DatabaseName);
   if result=nil then  // not already opened -> try now from primary host
   try // note: authentication works on a single database per socket connection
     if not fConnections[0].Opened then
@@ -5779,7 +5772,7 @@ begin
       raise;
     end;
     result := TMongoDatabase.Create(Self,DatabaseName);
-    fDatabases.AddObject(DatabaseName,result);
+    fDatabases.AddObjectUnique(DatabaseName,@result);
   finally
     FillZero(digest);
   end;
@@ -5954,11 +5947,12 @@ constructor TMongoDatabase.Create(aClient: TMongoClient;
 var colls: TBSONIterator;
     full,db,coll: RawUTF8;
     resp,batch: variant;
+    mc: TMongoCollection;
     ndx: Integer;
 begin
   fClient := aClient;
   fName := aDatabaseName;
-  fCollections := TRawUTF8ListHashed.Create(true);
+  fCollections := TRawUTF8List.Create([fObjectsOwned,fNoDuplicate,fCaseSensitive]);
   if fClient.ServerBuildInfoNumber<3000000 then begin
     if colls.Init(Client.Connections[0].GetBSONAndFree(TMongoRequestQuery.Create(
       aDatabaseName+'.system.namespaces',null,'name',maxInt))) then
@@ -5969,9 +5963,10 @@ begin
         split(full,'.',db,coll);
         if db<>aDatabaseName then
           raise EMongoConnectionException.CreateUTF8(
-            '%.Create: invalid "%" collection name for DB "%"',
+            '%.Create: invalid [%] collection name for DB [%]',
             [self,full,aDatabaseName],Client.Connections[0]);
-        fCollections.AddObject(coll,TMongoCollection.Create(self,coll));
+        mc := TMongoCollection.Create(self,coll);
+        fCollections.AddObjectUnique(coll,@mc);
       end;
     end;
   end else begin
@@ -5979,8 +5974,10 @@ begin
     if _Safe(resp)^.GetValueByPath('cursor.firstBatch',batch) then
       with _Safe(batch)^ do
       for ndx := 0 to Count-1 do
-        if _Safe(Values[ndx]).GetAsRawUTF8('name',coll) then
-          fCollections.AddObject(coll,TMongoCollection.Create(self,coll));
+        if _Safe(Values[ndx]).GetAsRawUTF8('name',coll) then begin
+          mc := TMongoCollection.Create(self,coll);
+          fCollections.AddObjectUnique(coll,@mc);
+        end;
   end;
 end;
 
@@ -6026,7 +6023,7 @@ begin
   if result=nil then
     if self<>nil then begin
       result := TMongoCollection.Create(self,Name);
-      fCollections.AddObject(Name,result);
+      fCollections.AddObjectUnique(Name,@result);
     end;
 end;
 
@@ -6034,7 +6031,7 @@ function TMongoDatabase.GetCollectionOrNil(const Name: RawUTF8): TMongoCollectio
 begin
   if self=nil then
     result := nil else
-    result := TMongoCollection(fCollections.GetObjectByName(Name));
+    result := fCollections.GetObjectFrom(Name);
 end;
 
 function TMongoDatabase.RunCommand(const command: variant;
@@ -6159,7 +6156,7 @@ begin
   result := fDatabase.RunCommand(BSONVariant('{drop:?}',[],[Name]),res);
   Database.Client.Log.Log(sllTrace,'Drop("%")->%',[Name,res],self);
   if result='' then
-    Database.fCollections.Delete(fDatabase.fCollections.IndexOf(Name));
+    Database.fCollections.Delete(Name);
 end;
 
 procedure TMongoCollection.EnsureIndex(const Keys, Options: variant);
@@ -6587,7 +6584,8 @@ begin
   result := r64;
 end;
 
-procedure append(var dest: PUTF8Char; var dig: PByte; digits: PtrInt); {$ifdef HASINLINE}inline;{$endif}
+procedure append(var dest: PUTF8Char; var dig: PByte; digits: PtrInt);
+  {$ifdef HASINLINE}inline;{$endif}
 begin
   if digits>0 then
     repeat
@@ -6610,7 +6608,7 @@ var dest: PUTF8Char;
     _128: THash128Rec;
 begin
   dest := @Buffer;
-  if Int64(Bits.hi)<0 then begin
+  if Bits.h<0 then begin
     dest^ := '-';
     inc(dest);
   end;

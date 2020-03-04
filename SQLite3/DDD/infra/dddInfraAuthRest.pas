@@ -45,11 +45,8 @@ unit dddInfraAuthRest;
 
   ***** END LICENSE BLOCK *****
 
-  Version 1.18
-  - first public release, corresponding to Synopse mORMot Framework 1.18
-
   TODO:
-   - manage Authentication expiration
+   - manage Authentication expiration?
 
 }
 
@@ -205,7 +202,7 @@ begin
     fLogged := true;
     CqrsSetResult(cqrsSuccess,result);
   end else
-    CqrsSetResultMsg(cqrsBadRequest,'Wrong Password for "%"',[fChallengeLogonName],result);
+    CqrsSetResultMsg(cqrsBadRequest,'Wrong Password for [%]',[fChallengeLogonName],result);
   fChallengeNonce := '';
   fChallengeLogonName := '';
 end;

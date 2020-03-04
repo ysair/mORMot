@@ -47,40 +47,6 @@ unit mORMotService;
 
   ***** END LICENSE BLOCK *****
 
-
-      Daemon / Service managment classes
-      ----------------------------------
-
-    Version 1.3
-    - TService debug and enhancements
-    - can compile without SQLite3Commons dependency for smaller executables
-
-    Version 1.4 - February 8, 2010
-    - whole Synopse SQLite3 database framework released under the GNU Lesser
-      General Public License version 3, instead of generic "Public Domain"
-
-    Version 1.16
-    - code refactoring after Leander007 proposals for better compatibility -
-      see https://synopse.info/forum/viewtopic.php?id=584
-
-    Version 1.18
-    - renamed SQLite3Service.pas to mORMotService.pas
-    - added FPC compatibility (including missing WinSvc.pas API unit)
-    - changed ServicesRun to return an indicator of success - see [8666906039]
-    - TServiceController.CreateOpenService() use lower rights - see [c3ebb6b5d6]
-    - added TServiceSingle class and its global handler (to be used instead of
-      TServer which does not work as expected)
-    - added logging to the Service registration and command process
-    - added TServiceController.CheckParameters() generic method to control
-      a service from the command line
-    - check the executable file in TServiceController.CreateNewService()
-    - use private global ServiceLog instead of TSQLLog - see [779d773e966]
-    - ensure TServiceController.CreateNewService() won't allow to install
-      the service on a network drive - see [f487d3de45]
-    - add an optional Description text when the service is installed
-    - added TSynDaemon/TSynDaemonSettings cross-platform classses as a lighter
-      alternative to dddInfraApps/dddInfraSettings
-
 }
 
 interface
@@ -107,6 +73,7 @@ uses
   Contnrs,
   {$endif}
   SynCommons,
+  SynTable,
   SynLog,
   SynCrypto, // for executable MD5/SHA256 hashes
   mORMot; // for TSynJsonFileSettings (i.e. JSON serialization)
@@ -847,7 +814,7 @@ begin
     SC_MANAGER_ALL_ACCESS);
   if FSCHandle=0 then begin
     backupError := GetLastError;
-    ServiceLog.Add.Log(sllLastError,'OpenSCManager("%","%") for "%"',
+    ServiceLog.Add.Log(sllLastError,'OpenSCManager(''%'',''%'') for [%]',
       [TargetComputer,DatabaseName,FName]);
     SetLastError(backupError);
     Exit;
@@ -873,7 +840,7 @@ begin
     GENERIC_READ);
   if FSCHandle = 0 then begin
     backupError := GetLastError;
-    ServiceLog.Add.Log(sllLastError,'OpenSCManager("%","%") for "%"',
+    ServiceLog.Add.Log(sllLastError,'OpenSCManager(''%'',''%'') for [%]',
       [TargetComputer,DatabaseName,FName]);
     SetLastError(backupError);
     Exit;
@@ -979,7 +946,7 @@ end;
 begin
   for i := 1 to ParamCount do begin
     param := SysUtils.LowerCase(paramstr(i));
-    ServiceLog.Add.Log(sllInfo,'Controling % with command "%"',[ServiceName,param]);
+    ServiceLog.Add.Log(sllInfo,'Controling % with command [%]',[ServiceName,param]);
     if param='/install' then
      TServiceController.Install(
        ServiceName,DisplayName,Description,true,ExeFileName,Dependencies) else
@@ -1058,7 +1025,7 @@ begin
   fStatusRec.dwCurrentState := SERVICE_STOPPED;
   fStatusRec.dwControlsAccepted := 31;
   fStatusRec.dwWin32ExitCode := NO_ERROR;
-  ServiceLog.Add.Log(sllInfo,'Create: % (%) running as "%"',
+  ServiceLog.Add.Log(sllInfo,'Create: % (%) running as [%]',
     [ServiceName,aDisplayName,ExeVersion.ProgramFullSpec],self);
 end;
 
@@ -2207,12 +2174,12 @@ var
     end
     else begin
       error := GetLastError;
-      msg := FormatUTF8('Error % "%" occured with',
+      msg := FormatUTF8('Error % [%] occured with',
         [error, StringToUTF8(SysErrorMessage(error))]);
       TextColor(ccLightRed);
       ExitCode := 1; // notify error to caller batch
     end;
-    msg := FormatUTF8('% "%" (%) on Service "%"',
+    msg := FormatUTF8('% [%] (%) on Service ''%''',
       [msg, param, cmdText, fSettings.ServiceName]);
     writeln(UTF8ToConsole(msg));
     TextColor(ccLightGray);
