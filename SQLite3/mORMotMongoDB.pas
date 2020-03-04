@@ -44,17 +44,11 @@ unit mORMotMongoDB;
 
   ***** END LICENSE BLOCK *****
 
-
-  Version 1.18
-  - first public release, corresponding to mORMot Framework 1.18
-    and feature request [0fee1d995c]
-
-
   TODO:
-  - complex WHERE clause with a MongoDB Query object instead of SQL syntax
-    (mitigated by the fact that most SQL queries are translated into BSON
-    Query Object at runtime - need for most complex features like in-object
-    inspection)
+  - complex WHERE clause with a MongoDB Query object instead of SQL syntax;
+    mitigated by the fact that most SQL queries are translated into BSON
+    Query Object at runtime - needed only for most complex features like
+    in-object inspection?
   - handle TSQLRawBlob fields with GridFS (and rely on TByteDynArray to store
     smaller BLOBs - < 16 MB - within the document, or in a separated collection)
   - allow PolyMorphic schemas: the same MongoDB collection may be able to
@@ -325,7 +319,7 @@ begin
   if aMongoCollectionName='' then
     aMongoCollectionName := Props.Props.SQLTableName;
   Props.ExternalDB.Init(aClass,aMongoCollectionName,
-    aMongoDatabase.CollectionOrCreate[aMongoCollectionName],true);
+    aMongoDatabase.CollectionOrCreate[aMongoCollectionName],true,[]);
   Props.ExternalDB.MapField('ID','_id');
   result := TSQLRestStorageMongoDB.Create(aClass,aServer);
   aServer.StaticDataAdd(result);
@@ -596,7 +590,7 @@ begin
       ndx := fStoredClassRecordProps.Fields.IndexByName(doc.Names[i]);
       if ndx<0 then
         raise EORMMongoDBException.CreateUTF8(
-          '%.DocFromJSON: unkwnown field name "%"',[self,doc.Names[i]]);
+          '%.DocFromJSON: unkwnown field name [%]',[self,doc.Names[i]]);
       doc.Names[i] := fStoredClassMapping^.ExtFieldNames[ndx];
       info := fStoredClassRecordProps.Fields.List[ndx];
       V := @doc.Values[i];
@@ -917,8 +911,8 @@ begin
       name := fStoredClassMapping^.ExternalToInternalOrNull(doc.Names[i]);
       if name='' then
         raise EORMMongoDBException.CreateUTF8(
-          '%.JSONFromDoc: Unknown field "%" for %',[self,doc.Names[i],fStoredClass]);
-      W.AddFieldName(pointer(name),Length(name));
+          '%.JSONFromDoc: Unknown field [%] for %',[self,doc.Names[i],fStoredClass]);
+      W.AddProp(pointer(name),Length(name));
       W.AddVariant(doc.Values[i],twJSONEscape);
       W.Add(',');
     end;
@@ -987,7 +981,7 @@ begin
       if docv^.GetVarData(fBSONProjectionBlobFieldsNames[f],blob) then
         BSONVariantType.ToBlob(variant(blob),blobRaw) else
         raise EORMMongoDBException.CreateUTF8(
-          '%.RetrieveBlobFields(%): field "%" not found',
+          '%.RetrieveBlobFields(%): field [%] not found',
           [self,Value,fBSONProjectionBlobFieldsNames[f]]);
       (fStoredClassRecordProps.BlobFields[f] as TSQLPropInfoRTTIRawBlob).
         SetBlob(Value,blobRaw);
@@ -1117,7 +1111,7 @@ begin
     with Stmt.Where[w] do begin
       FieldName := fStoredClassMapping^.FieldNameByIndex(Field-1)+SubField;
       if not B.BSONWriteQueryOperator(FieldName,NotClause,Operator,ValueVariant) then begin
-        InternalLog('%.EngineList: operator % not supported for field "%" in [%]',
+        InternalLog('%.EngineList: operator % not supported for field [%] in [%]',
           [ClassType,ToText(Operator)^,FieldName,SQL],sllError);
         exit;
       end;

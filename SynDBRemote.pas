@@ -44,9 +44,6 @@ unit SynDBRemote;
 
   ***** END LICENSE BLOCK *****
 
-  Version 1.18
-  - first public release, corresponding to mORMot Framework 1.18
-
 }
 
 {$I Synopse.inc} // define HASINLINE CPU32 CPU64 OWNNORMTOUPPER
@@ -372,7 +369,7 @@ begin
       '%.ProcessMessage: Error % from %',[self,status,fURI.URI]);
   if ContentType<>BINARY_CONTENT_TYPE then
     raise ESQLDBRemote.CreateUTF8(
-      '%.ProcessMessage: Invalid content type "%" from %',[self,ContentType,fURI.URI]);
+      '%.ProcessMessage: Invalid content type [%] from %',[self,ContentType,fURI.URI]);
   Output := Content;
 end;
 

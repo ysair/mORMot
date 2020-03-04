@@ -44,61 +44,6 @@ unit SynLog;
 
   ***** END LICENSE BLOCK *****
 
-  Version 1.18
-  - first public release, extracted from SynCommons.pas unit
-  - BREAKING CHANGE: PWinAnsiChar type for constant text format parameters has
-    been changed into a RawUTF8, to please all supported platforms and compilers
-  - WARNING: any user of the framework in heavy-loaded multi-threaded application
-    should UPGRADE to at least revision 1.18.1351, fixing a long-standing bug
-  - all logged timestamps are now in much less error-prone UTC by default,
-    unless the TSynLogFamily.LocalTimestamp property is defined
-  - unit fixed and tested with Delphi XE2 (and up) 64-bit compiler under Windows
-  - compatibility with (Cross)Kylix 3 and FPC 3.1 under Linux (and Darwin)
-  - Exception logging and Stack trace do work now on Linux with Kylix/CrossKylix
-  - added TSynLogFile.Freq read-only property
-  - added DefaultSynLogExceptionToStr() function and TSynLogExceptionToStrCustom
-    variable, and ESynException.CustomLog() method to customize how raised
-    exception are logged when intercepted - feature request [495720e0b9]
-  - added new sllDDDError, sllDDDInfo log levels
-  - added TSynLogFamily.EndOfLineCRLF properties
-  - added TSynLogFamily's NoFile and EchoCustom properties - see [91a114d2f6]
-  - TSynLog will now append only the execution time when leaving a method,
-    without the class/method name (smaller log file, and less resource use)
-  - TSynLog header now contains system environment variables
-  - added overloaded ISynLog.Log(string) method for Unicode Delphi
-  - added TSynLog.DebuggerNotify() and TSynLog.CloseLogFile / Release methods
-  - protected the global TSynLog instances list against potential race condition
-  - introducing TSynLogFamily.StackTraceUse: TSynLogStackTraceUse property
-    (set to stManualAndAPI by default, but stOnlyAPI within the Delphi IDE)
-  - introducing TSynLogFamily.EchoToConsole: TSynLogInfos property, able to
-    optionally echo the process log to the current console window, using colors
-  - added TSynLogFamily.EchoRemoteStart() and EchoRemoteStop methods
-  - added TSynLog.Void class function
-  - added TSynLogFile.EventSelect method
-  - if new property TSynLogFamily.PerThreadLog is set to ptIdentifiedInOnFile,
-    a new column will be added for each logged row - LogViewer has been updated
-    to allow easy and efficient multi-thread process logging
-  - introducing TSynLogFamily.RotateFileCount and associated RotateFileSizeKB,
-    RotateFileDailyAtHour and OnRotate properties, to enable log file rotation
-    by size or at given hour - request [72feb66d45] + [b3e8cc8424]
-  - added TSynLog.CustomFileName property - see [d8fbc10bf8]
-  - added TSynLog.ComputeFileName virtual method and TSynLogFamily.FileExistsAction
-    property for feature request [d029051dcb]
-  - added TSynLog/ISynLog.LogLines() method for direct multi-line text logging
-  - added optional TextTruncateAtLength parameter for TSynLog/ISynLog.Log()
-  - declared TSynLog.LogInternal() methods as virtual - request [e47c64fb2c]
-  - .NET/CLR external exceptions will now be logged with their C# type name
-  - special 'SetThreadName' exception will now be ignored by TSynLog hook
-  - introducing TSynLog.Enter overload method, with FormatUTF8-like parameters
-  - fixed ticket [19e567b8ca] about TSynLog issue in heavily concurrent mode:
-    now a per-thread context will be stored, e.g. for Enter/Leave tracking
-  - fixed ticket [a516b1a954] about ptOneFilePerThread log file rotation
-  - introduced clear distinction between absolute and relative memory address
-    values, and TSynMapFile.AbsoluteToOffset(), as reported by [0aeaa1353149]
-  - introduced ISynLogCallback and TSynLogCallbacks types for easy integration
-    with mORMot's interface-based services real-time notification
-  - FPC compatibility - with source lines if compiled using -g or -gl switches
-
 *)
 
 
@@ -861,7 +806,7 @@ type
     // any call to this method MUST call LogTrailerUnLock
     function LogHeaderLock(Level: TSynLogInfo; AlreadyLocked: boolean): boolean;
     procedure LogTrailerUnLock(Level: TSynLogInfo); {$ifdef HASINLINENOTX86}inline;{$endif}
-    procedure LogCurrentTime;
+    procedure LogCurrentTime; virtual;
     procedure LogFileInit; virtual;
     procedure LogFileHeader; virtual;
     {$ifndef DELPHI5OROLDER}
@@ -1324,7 +1269,7 @@ type
     /// the computer Operating System in which the process was running on
     // - returns e.g. '2.3=5.1.2600' for Windows XP
     // - under Linux, it will return the full system version, e.g.
-    // 'Linux-3.13.0-43-generic#72-Ubuntu-SMP-Mon-Dec-8-19:35:44-UTC-2014'
+    // 'Ubuntu=Linux-3.13.0-43-generic#72-Ubuntu-SMP-Mon-Dec-8-19:35:44-UTC-2014'
     property DetailedOS: RawUTF8 read fOSDetailed;
     /// the associated framework information
     // - returns e.g. 'TSQLLog 1.18.2765 ERTL FTS3'
@@ -1783,7 +1728,7 @@ constructor TSynMapFile.Create(const aExeName: TFileName=''; MabCreate: boolean=
           inc(U.Symbol.Stop,U.Symbol.Start-1);
           if (U.Symbol.Name<>'') and
              ((U.Symbol.Start<>0) or (U.Symbol.Stop<>0)) then
-            fUnits.FindHashedAndUpdate(U,true); // true for adding
+            fUnits.FindHashedAndUpdate(U,{addifnotexisting=}true);
         end;
         NextLine;
       end;
@@ -4353,31 +4298,32 @@ begin
       Add('*');
       Add(wProcessorArchitecture); Add('-'); Add(wProcessorLevel); Add('-');
       Add(wProcessorRevision);
+    {$endif}
       {$ifdef CPUINTEL}
       Add(':'); AddBinToHex(@CpuFeatures,SizeOf(CpuFeatures));
       {$endif}
-      AddShort(' OS='); Add(ord(OSVersion)); Add('.'); Add(wServicePackMajor);
+      AddShort(' OS=');
+    {$ifdef MSWINDOWS}
+      Add(ord(OSVersion)); Add('.'); Add(wServicePackMajor);
       Add('='); Add(dwMajorVersion); Add('.'); Add(dwMinorVersion); Add('.');
       Add(dwBuildNumber);
-      AddShort(' Wow64='); Add(integer(IsWow64));
     end;
     {$else}
-    {$ifdef CPUINTEL}
-    Add(':'); AddBinToHex(@CpuFeatures,SizeOf(CpuFeatures));
-    {$endif}
-    AddShort(' OS=');
-    AddNoJSONEscape(@SystemInfo.uts.sysname); Add('-');
-    AddNoJSONEscape(@SystemInfo.uts.release);
+    AddTrimLeftLowerCase(ToText(OS_KIND)); Add('=');
+    AddTrimSpaces(@SystemInfo.uts.sysname); Add('-');
+    AddTrimSpaces(@SystemInfo.uts.release);
     AddReplace(@SystemInfo.uts.version,' ','-');
-    AddShort(' Wow64=0');
-    {$endif}
+    {$endif MSWINDOWS}
+    if OSVersionInfoEx<> '' then begin
+      Add('/'); AddTrimSpaces(OSVersionInfoEx); end;
+    {$ifdef MSWINDOWS}
+    AddShort(' Wow64='); Add(integer(IsWow64));
     AddShort(' Freq=');
-    {$ifdef LINUX}
-    AddShort('1000000'); // taken by QueryPerformanceMicroSeconds()
-    {$else}
     QueryPerformanceFrequency(fFrequencyTimestamp);
     Add(fFrequencyTimestamp);
-    {$endif LINUX}
+    {$else}
+    AddShort(' Wow64=0 Freq=1000000'); // taken by QueryPerformanceMicroSeconds()
+    {$endif MSWINDOWS}
     if IsLibrary then begin
       AddShort(' Instance=');
       AddNoJSONEscapeString(InstanceFileName);
@@ -4736,7 +4682,7 @@ begin // aLevel = sllEnter,sllLeave or sllNone
         fWriter.AddInstancePointer(Instance,'.',fFamily.WithUnitName,fFamily.WithInstancePointer);
       if MethodName<>nil then begin
         if MethodNameLocal<>mnLeave then begin
-          fWriter.AddNoJSONEscape(MethodName);
+          fWriter.AddOnSameLine(MethodName);
           case MethodNameLocal of
           mnEnter:
             MethodNameLocal := mnLeave;

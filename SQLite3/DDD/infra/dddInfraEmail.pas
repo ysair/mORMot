@@ -45,9 +45,6 @@ unit dddInfraEmail;
 
   ***** END LICENSE BLOCK *****
 
-  Version 1.18
-  - first public release, corresponding to Synopse mORMot Framework 1.18
-
 }
 
 {$I Synopse.inc} // define HASINLINE CPU32 CPU64 OWNNORMTOUPPER
@@ -425,7 +422,7 @@ begin
     msg := Template.ComputeMessage(context,aTemplate.FileName);
     if msg='' then
       CqrsSetResultMsg(cqrsInvalidContent,
-        'Impossible to render template "%"',[aTemplate.FileName],result) else
+        'Impossible to render template [%]',[aTemplate.FileName],result) else
       if EMailer.SendEmail(TRawUTF8DynArrayFrom([aEmail]),
           aTemplate.SenderEmail,aTemplate.Subject,'',msg)=cqrsSuccess then
         if Rest.AddOrUpdate(EmailValidation)=0 then

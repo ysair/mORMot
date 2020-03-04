@@ -50,16 +50,6 @@ unit SynWinSock;
 
   ***** END LICENSE BLOCK *****
 
-
-
-     Low level access to network Sockets
-    *************************************
-
-  Version 1.18
-  - fixed ticket [f79ff5714b] about potential finalization issues as .bpl in IDE
-  - fixed Win64 compatibility issue
-
-
 }
 
 {.$DEFINE WINSOCK1}
@@ -845,6 +835,7 @@ type
   PSecPkgContextStreamSizes = ^TSecPkgContextStreamSizes;
 
   ESChannel = class(Exception);
+
   {$ifdef UNICODE}TSChannelClient = record{$else}TSChannelClient = object{$endif}
   private
     Cred: TCredHandle;
@@ -1533,7 +1524,7 @@ begin
             SockSChannelApi := Assigned(AcquireCredentialsHandle) and
               Assigned(InitializeSecurityContext) and
               Assigned(QueryContextAttributes) and
-              Assigned(EncryptMessage);
+              Assigned(EncryptMessage) and Assigned(DecryptMessage);
           end;
         end;
         result := True;

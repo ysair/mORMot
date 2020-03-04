@@ -52,9 +52,6 @@ unit SynFPCSock;
 
   Shared by Kylix and FPC for all POSIX systems.
 
-  Version 1.18
-  - initial release
-
 }
 
 {$ifdef FPC}
@@ -1164,7 +1161,7 @@ begin
           x := 1;
         end else
           x := Resolvename(name,a4) else
-        x := 1;
+          x := 1;
       for n := 1  to x do
         IpList.Add(netaddrToStr(a4[n]));
     end;

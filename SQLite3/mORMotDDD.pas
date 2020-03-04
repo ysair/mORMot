@@ -45,9 +45,6 @@ unit mORMotDDD;
 
   ***** END LICENSE BLOCK *****
 
-  Version 1.18
-  - first public release, corresponding to Synopse mORMot Framework 1.18
-
 }
 
 {$I Synopse.inc} // define HASINLINE CPU32 CPU64 OWNNORMTOUPPER
@@ -1294,7 +1291,7 @@ begin
   if (aAggregate=nil) or (fRest=nil) or (fTable=nil) then
     raise EDDDRepository.CreateUTF8(self,'Invalid %.Create(nil)',[self]);
   fAggregate.Init(aAggregate);
-  fPropsMapping.Init(aTable,RawUTF8(aAggregate.ClassName),aRest,false);
+  fPropsMapping.Init(aTable,RawUTF8(aAggregate.ClassName),aRest,false,[]);
   fPropsMapping.MapFields(['ID','####']); // no ID/RowID for our aggregates
   fPropsMapping.MapFields(TableAggregatePairs);
   fAggregateRTTI := TSQLPropInfoList.Create(aAggregate, GetAggregateRTTIOptions);
@@ -2190,7 +2187,6 @@ constructor TDDDMonitoredDaemon.Create(aRest: TSQLRest);
 begin
   fProcessIdleDelay := 50;
   fProcessLock := TAutoLocker.Create;
-  fProcessTimer.Start;
   if fProcessThreadCount<1 then
     fProcessThreadCount := 1 else
   if fProcessThreadCount>20 then

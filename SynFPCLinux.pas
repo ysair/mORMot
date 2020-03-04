@@ -1,4 +1,6 @@
 /// wrapper of some Windows-like functions translated to Linux/BSD for FPC
+// - this unit is a part of the freeware Synopse mORMot framework,
+// licensed under a MPL/GPL/LGPL tri-license; version 1.18
 unit SynFPCLinux;
 
 {
@@ -44,10 +46,6 @@ unit SynFPCLinux;
   the terms of any one of the MPL, the GPL or the LGPL.
 
   ***** END LICENSE BLOCK *****
-
-
-  Version 1.18
-  - initial revision
 
 }
 
@@ -412,7 +410,7 @@ procedure QueryPerformanceMicroSeconds(out Value: Int64);
 var r : TTimeSpec;
 begin
   clock_gettime(CLOCK_MONOTONIC,@r);
-  value := r.tv_nsec div C_THOUSAND+r.tv_sec*C_MILLION; // as microseconds
+  value := PtrUInt(r.tv_nsec) div C_THOUSAND+r.tv_sec*C_MILLION; // as microseconds
 end;
 
 procedure GetNowUTCSystem(out result: TSystemTime);
@@ -560,7 +558,8 @@ begin
   if fpuname(uts)=0 then begin
     P := @uts.release[0];
     KernelRevision := GetNext shl 16+GetNext shl 8+GetNext;
-  end;
+  end else
+    uts.release[0] := #0;
   {$ifdef DARWIN}
   mach_timebase_info(mach_timeinfo);
   mach_timecoeff := mach_timeinfo.Numer/mach_timeinfo.Denom;
@@ -572,6 +571,10 @@ begin
     CLOCK_REALTIME_FAST := CLOCK_REALTIME_COARSE;
   if clock_gettime(CLOCK_MONOTONIC_COARSE, @tp) = 0 then
     CLOCK_MONOTONIC_FAST := CLOCK_MONOTONIC_COARSE;
+  if (clock_gettime(CLOCK_REALTIME_FAST,@tp)<>0) or // paranoid check
+     (clock_gettime(CLOCK_MONOTONIC_FAST,@tp)<>0) then
+    raise Exception.CreateFmt('clock_gettime() not supported by %s kernel - errno=%d',
+      [PAnsiChar(@uts.release),GetLastError]);
   {$endif LINUX}
   {$endif DARWIN}
 end;
