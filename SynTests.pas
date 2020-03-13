@@ -326,7 +326,7 @@ type
     // it is an index to the corresponding published method, and the Strings[]
     // contains the associated failure message
     fFailed: TStringList;
-    fTestCase: TObjectList;
+    fTestCase: TSynObjectList;
     fAssertions: integer;
     fAssertionsFailed: integer;
     fCurrentMethod, fCurrentMethodIndex: integer;
@@ -679,9 +679,10 @@ end;
 
 procedure TSynTestCase.CheckUTF8(condition: Boolean; const msg: RawUTF8;
   const args: array of const);
-  procedure SubProcForMessage;
-  var str: string;
-  begin
+var str: string; // using a sub-proc may be faster, but unstable on Android
+begin
+  InterlockedIncrement(fAssertions);
+  if not condition or (tcoLogEachCheck in fOptions) then begin
     if msg<>'' then begin
       FormatString(msg,args,str);
       if tcoLogEachCheck in fOptions then
@@ -690,10 +691,6 @@ procedure TSynTestCase.CheckUTF8(condition: Boolean; const msg: RawUTF8;
     if not condition then
       TestFailed(str);
   end;
-begin
-  InterlockedIncrement(fAssertions);
-  if not condition or (tcoLogEachCheck in fOptions) then
-    SubProcForMessage;
 end;
 
 procedure TSynTestCase.CheckLogTimeStart;
@@ -948,7 +945,7 @@ constructor TSynTests.Create(const Ident: string);
 begin
   inherited Create(Ident);
   fFailed := TStringList.Create;
-  fTestCase := TObjectList.Create;
+  fTestCase := TSynObjectList.Create;
   fSafe.Init;
 end;
 

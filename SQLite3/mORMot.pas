@@ -119,6 +119,10 @@ unit mORMot;
   {$define NOGSSAPIAUTH} // SynGSSAPI.pas unit is not Kylix-compatible
 {$endif}
 
+{$ifdef Android}
+  {$define NOGSSAPIAUTH} // SynGSSAPI.pas unit is not Android-compatible [anymore]
+{$endif}
+
 {$ifdef SSPIAUTH}
   {$undef GSSAPIAUTH} // exclusive
   {$ifdef NOSSPIAUTH}
@@ -623,7 +627,8 @@ type
   // - this is the main process for marshalling JSON into SQL statements
   // - used e.g. by GetJSONObjectAsSQL() function or ExecuteFromJSON and
   // InternalBatchStop methods
-  {$ifdef UNICODE}TJSONObjectDecoder = record{$else}TJSONObjectDecoder = object{$endif}
+  {$ifdef USERECORDWITHMETHODS}TJSONObjectDecoder = record
+    {$else}TJSONObjectDecoder = object{$endif}
   public
     /// contains the decoded field names
     FieldNames: array[0..MAX_SQLFIELDS-1] of RawUTF8;
@@ -1123,7 +1128,8 @@ type
   /// store information about a class, able to easily create new instances
   // - using this temporary storage will speed up the creation process
   // - any virtual constructor will be used, including for TCollection types
-  {$ifdef UNICODE}TClassInstance = record{$else}TClassInstance = object{$endif}
+  {$ifdef USERECORDWITHMETHODS}TClassInstance = record
+    {$else}TClassInstance = object{$endif}
   public
     /// the class type itself
     ItemClass: TClass;
@@ -1182,7 +1188,8 @@ type
   //  as in the TypInfo.GetPropInfos() PPropList usage
   // - for TSQLRecord, you should better use the RecordProps.Fields[] array,
   // which is faster and contains the properties published in parent classes
-  {$ifdef UNICODE}TClassProp = record{$else}TClassProp = object{$endif}
+  {$ifdef USERECORDWITHMETHODS}TClassProp = record
+    {$else}TClassProp = object{$endif}
   public
     /// number of published properties in this object
     PropCount: Word;
@@ -1202,7 +1209,8 @@ type
 
   PClassType = ^TClassType;
   /// a wrapper to class type information, as defined by the Delphi RTTI
-  {$ifdef UNICODE}TClassType = record{$else}TClassType = object{$endif}
+  {$ifdef USERECORDWITHMETHODS}TClassType = record
+    {$else}TClassType = object{$endif}
   public
     /// the class type
     ClassType: TClass;
@@ -1231,7 +1239,8 @@ type
   // - we use this to store the enumeration values as integer, but easily provide
   // a text equivalent, translated if necessary, from the enumeration type
   // definition itself
-  {$ifdef UNICODE}TEnumType = record{$else}TEnumType = object{$endif}
+  {$ifdef USERECORDWITHMETHODS}TEnumType = record
+    {$else}TEnumType = object{$endif}
   public
     /// specify ordinal storage size and sign
     // - is prefered to MaxValue to identify the number of stored bytes
@@ -1405,7 +1414,8 @@ type
     {$push}
     {$PACKRECORDS 1}
   {$endif}
-  {$ifdef UNICODE}TTypeInfo = record{$else}TTypeInfo = object{$endif}
+  {$ifdef USERECORDWITHMETHODS}TTypeInfo = record
+    {$else}TTypeInfo = object{$endif}
   public
     /// the value type family
     Kind: TTypeKind;
@@ -1489,7 +1499,8 @@ type
   /// a wrapper containing a RTTI property definition
   // - used for direct Delphi / UTF-8 SQL type mapping/conversion
   // - doesn't depend on RTL's TypInfo unit, to enhance cross-compiler support
-  {$ifdef UNICODE}TPropInfo = record{$else}TPropInfo = object{$endif}
+  {$ifdef USERECORDWITHMETHODS}TPropInfo = packed record
+    {$else}TPropInfo = object{$endif} { "packed" above is needed on ARM (alf) }
   public
     /// raw retrieval of the property read access definition
     // - note: 'var Call' generated incorrect code on Delphi XE4 -> use PMethod
@@ -1816,7 +1827,8 @@ type
   PParamInfo  = ^TParamInfo;
 
   /// a wrapper around method returned result definition
-  {$ifdef UNICODE}TReturnInfo = record{$else}TReturnInfo = object{$endif}
+  {$ifdef USERECORDWITHMETHODS}TReturnInfo = record
+    {$else}TReturnInfo = object{$endif}
   public
     /// RTTI version
     // - 2 up to Delphi 2010, 3 for Delphi XE and up
@@ -1836,7 +1848,8 @@ type
   end;
 
   /// a wrapper around an individual method parameter definition
-  {$ifdef UNICODE}TParamInfo = record{$else}TParamInfo = object{$endif}
+  {$ifdef USERECORDWITHMETHODS}TParamInfo = record
+    {$else}TParamInfo = object{$endif}
   public
     /// the kind of parameter
     Flags: TParamFlags;
@@ -1859,7 +1872,8 @@ type
   end;
 
   /// a wrapper around a method definition
-  {$ifdef UNICODE}TMethodInfo = record{$else}TMethodInfo = object{$endif}
+  {$ifdef USERECORDWITHMETHODS}TMethodInfo = packed record
+    {$else}TMethodInfo = object{$endif}
   public
     {$ifdef FPC}
     /// method name
@@ -1903,7 +1917,7 @@ type
       /// =$ff for a ptField address, or =$fe for a ptVirtual method
       Kind: byte;
     end;
-  {$A+}
+  {$A+} // back to normal alignment
 {$endif FPC}
 
 const
@@ -3612,7 +3626,8 @@ type
   // consolidated statistics
   // - it will therefore store up to 24*365+365+12+1 = 9138 records per year
   // in the associated storage engine (so there is no actual need to purge it)
-  {$ifdef UNICODE}TSynMonitorUsageID = record{$else}TSynMonitorUsageID = object{$endif}
+  {$ifdef USERECORDWITHMETHODS}TSynMonitorUsageID = record
+    {$else}TSynMonitorUsageID = object{$endif}
   public
     /// the TID, as computed from time and granularity
     Value: integer;
@@ -4480,7 +4495,8 @@ type
 
   /// store all parameters for a Client or Server method call
   // - as used by TSQLRestServer.URI or TSQLRestClientURI.InternalURI
-  {$ifdef UNICODE}TSQLRestURIParams = record{$else}TSQLRestURIParams = object{$endif}
+  {$ifdef USERECORDWITHMETHODS}TSQLRestURIParams = record
+    {$else}TSQLRestURIParams = object{$endif}
   public
     /// input parameter containing the caller URI
     Url: RawUTF8;
@@ -4746,7 +4762,8 @@ type
   /// set the User Access Rights, for each Table
   // - one property for every and each URI method (GET/POST/PUT/DELETE)
   // - one bit for every and each Table in Model.Tables[]
-  {$ifdef UNICODE}TSQLAccessRights = record{$else}TSQLAccessRights = object{$endif}
+  {$ifdef USERECORDWITHMETHODS}TSQLAccessRights = record
+    {$else}TSQLAccessRights = object{$endif}
   public
     /// set of allowed actions on the server side
     AllowRemoteExecute: TSQLAllowRemoteExecute;
@@ -7011,7 +7028,7 @@ type
     /// contains the parameters used for sorting
     fSortParams: TSQLTableSortParams;
     /// contains the TSQLRecord instances created by NewRecord method
-    fOwnedRecords: TObjectList;
+    fOwnedRecords: TSynObjectList;
     /// if the TSQLRecord is the owner of this table, i.e. if it must free it
     fOwnerMustFree: Boolean;
     /// current cursor row (1..RowCount), as set by the Step() method
@@ -7908,7 +7925,8 @@ type
   /// used to store the locked record list, in a specified table
   // - the maximum count of the locked list if fixed to 512 by default,
   // which seems correct for common usage
-  {$ifdef UNICODE}TSQLLocks = record{$else}TSQLLocks = object{$endif}
+  {$ifdef USERECORDWITHMETHODS}TSQLLocks = record
+    {$else}TSQLLocks = object{$endif}
   public
     /// the number of locked records stored in this object
     Count: integer;
@@ -8201,7 +8219,8 @@ type
   // - in end user code, mostly MapField/MapFields/Options methods
   // should be used, if needed as a fluent chained interface - other lower
   // level methods will be used by the framework internals
-  {$ifdef UNICODE}TSQLRecordPropertiesMapping = record{$else}TSQLRecordPropertiesMapping = object{$endif}
+  {$ifdef USERECORDWITHMETHODS}TSQLRecordPropertiesMapping = record
+    {$else}TSQLRecordPropertiesMapping = object{$endif}
   private
     /// storage of main read-only properties
     fProps: TSQLRecordProperties;
@@ -8771,7 +8790,8 @@ type
   // depends on it to store the Table type
   // - since 6 bits are used for the table index, the corresponding table
   // MUST appear in the first 64 items of the associated TSQLModel.Tables[]
-  {$ifdef UNICODE}RecordRef = record{$else}RecordRef = object{$endif}
+  {$ifdef FPC_OR_UNICODE}RecordRef = record
+    {$else}RecordRef = object{$endif}
   public
     /// the value itself
     // - (value and 63) is the TableIndex in the current database Model
@@ -9510,7 +9530,8 @@ type
     vIsObjArray, vIsSPI, vIsQword, vIsDynArrayString, vIsDateTimeMS);
 
   /// describe a service provider method argument
-  {$ifdef UNICODE}TServiceMethodArgument = record{$else}TServiceMethodArgument = object{$endif}
+  {$ifdef USERECORDWITHMETHODS}TServiceMethodArgument = record
+    {$else}TServiceMethodArgument = object{$endif}
   public
     /// the argument name, as declared in Delphi
     ParamName: PShortString;
@@ -9629,7 +9650,8 @@ type
   TServiceMethodParamsDocVariantKind = (pdvArray, pdvObject, pdvObjectFixed);
 
   /// describe an interface-based service provider method
-  {$ifdef UNICODE}TServiceMethod = record{$else}TServiceMethod = object{$endif}
+  {$ifdef USERECORDWITHMETHODS}TServiceMethod = record
+    {$else}TServiceMethod = object{$endif}
   public
     /// the method URI, i.e. the method name
     // - as declared in Delphi code, e.g. 'Add' for ICalculator.Add
@@ -10333,9 +10355,6 @@ type
     fFakeStub: PByteArray;
     fMethodIndexCallbackReleased: Integer;
     fMethodIndexCurrentFrameCallback: Integer;
-    {$ifdef CPUAARCH64}
-    fDetectX0ResultMagic: cardinal; // alf: temporary hack for AARCH64
-    {$endif}
     procedure AddMethodsFromTypeInfo(aInterface: PTypeInfo); virtual; abstract;
     function GetMethodsVirtualTable: pointer;
   public
@@ -10364,7 +10383,7 @@ type
     class function GUID2TypeInfo(const aGUID: TGUID): PTypeInfo; overload;
     /// returns the list of all declared TInterfaceFactory
     // - as used by SOA and mocking/stubing features of this unit
-    class function GetUsedInterfaces: TObjectListLocked;
+    class function GetUsedInterfaces: TSynObjectListLocked;
     /// add some TInterfaceFactory instances from their GUID
     class procedure AddToObjArray(var Obj: TInterfaceFactoryObjArray;
        const aGUIDs: array of TGUID);
@@ -10752,7 +10771,8 @@ type
   end;
 
   /// define the rules for a given method as used internaly by TInterfaceStub
-  {$ifdef UNICODE}TInterfaceStubRules = record{$else}TInterfaceStubRules = object{$endif}
+  {$ifdef USERECORDWITHMETHODS}TInterfaceStubRules = record
+    {$else}TInterfaceStubRules = object{$endif}
   public
     /// the mocking / stubing rules associated to this method
     Rules: array of TInterfaceStubRule;
@@ -10800,7 +10820,8 @@ type
   TInterfaceStubLogLayouts = set of TInterfaceStubLogLayout;
 
   /// used to keep track of one stubbed method call
-  {$ifdef UNICODE}TInterfaceStubLog = record{$else}TInterfaceStubLog = object{$endif}
+  {$ifdef USERECORDWITHMETHODS}TInterfaceStubLog = record
+    {$else}TInterfaceStubLog = object{$endif}
   public
     /// call timestamp, in milliseconds
     // - is filled with GetTickCount64() API returned value
@@ -11384,7 +11405,8 @@ type
   /// server-side service provider uses this to store one internal instance
   // - used by TServiceFactoryServer in sicClientDriven, sicPerSession,
   // sicPerUser or sicPerGroup mode
-  {$ifdef UNICODE}TServiceFactoryServerInstance = record{$else}TServiceFactoryServerInstance = object{$endif}
+  {$ifdef USERECORDWITHMETHODS}TServiceFactoryServerInstance = record
+    {$else}TServiceFactoryServerInstance = object{$endif}
   public
     /// the internal Instance ID, as remotely sent in "id":1
     // - is set to 0 when an entry in the array is free
@@ -12107,7 +12129,7 @@ type
   protected
     fPublishSignature: boolean;
     fConnectionID: Int64;
-    fFakeCallbacks: TObjectListLocked; // TInterfacedObjectFakeServer instances
+    fFakeCallbacks: TSynObjectListLocked; // TInterfacedObjectFakeServer instances
     fOnCallbackReleasedOnClientSide: TOnCallbackReleased;
     fOnCallbackReleasedOnServerSide: TOnCallbackReleased;
     fCallbackOptions: TServiceCallbackOptions;
@@ -12390,7 +12412,8 @@ type
   TSQLRestCacheEntryValueDynArray = array of TSQLRestCacheEntryValue;
 
   /// for TSQLRestCache, stores a table settings and values
-  {$ifdef UNICODE}TSQLRestCacheEntry = record{$else}TSQLRestCacheEntry = object{$endif}
+  {$ifdef USERECORDWITHMETHODS}TSQLRestCacheEntry = record
+    {$else}TSQLRestCacheEntry = object{$endif}
   public
     /// TRUE if this table should use caching
     // - i.e. if was not set, or worth it for this table (e.g. in-memory table)
@@ -12729,7 +12752,7 @@ type
     fServerTimestampCacheTix: cardinal;
     fServerTimestampCacheValue: TTimeLogBits;
     fServices: TServiceContainer;
-    fPrivateGarbageCollector: TObjectList;
+    fPrivateGarbageCollector: TSynObjectList;
     fRoutingClass: TSQLRestServerURIContextClass;
     fBackgroundTimer: TSQLRestBackgroundTimer;
     fOnDecryptBody, fOnEncryptBody: TNotifyRestBody;
@@ -12974,7 +12997,7 @@ type
     /// a local "Garbage collector" list, for some classes instances which must
     // live during the whole TSQLRestServer process
     // - is used internally by the class, but can be used for business code
-    property PrivateGarbageCollector: TObjectList read fPrivateGarbageCollector;
+    property PrivateGarbageCollector: TSynObjectList read fPrivateGarbageCollector;
   public
     /// get the row count of a specified table
     // - returns -1 on error
@@ -14262,16 +14285,22 @@ type
     Sender: TServiceFactoryServer; Instance: TInterfacedObject) of object;
 
 {$ifdef MSWINDOWS}
+  TSQLRestServerNamedPipeResponse = class;
+
   /// Server thread accepting connections from named pipes
   TSQLRestServerNamedPipe = class(TSQLRestThread)
   private
   protected
     fServer: TSQLRestServer;
-    fChild: TList;
-    fChildCount: integer;
+    fChild: array of TSQLRestServerNamedPipeResponse;
+    fChildRunning: integer;
     fPipeName: TFileName;
     procedure InternalExecute; override;
   public
+    /// register a new response thread
+    procedure AddChild(new: TSQLRestServerNamedPipeResponse);
+    /// unregister a new response thread
+    procedure RemoveChild(new: TSQLRestServerNamedPipeResponse);
     /// create the server thread
     constructor Create(aServer: TSQLRestServer; const PipeName: TFileName); reintroduce;
     /// release all associated memory, and wait for all
@@ -14288,13 +14317,12 @@ type
     fServer: TSQLRestServer;
     fPipe: cardinal;
     fMasterThread: TSQLRestServerNamedPipe;
-    fMasterThreadChildIndex: Integer;
     procedure InternalExecute; override;
   public
     /// create the child connection thread
     constructor Create(aServer: TSQLRestServer; aMasterThread: TSQLRestServerNamedPipe;
       aPipe: cardinal); reintroduce;
-    /// release all associated memory, and decrement fMasterThread.fChildCount
+    /// release all associated memory, and decrement fMasterThread.fChildRunning
     destructor Destroy; override;
   end;
 
@@ -15616,7 +15644,8 @@ type
   /// used to access a TSQLRestServer from its TSQLRestServerURIString URI
   // - URI format is 'address:port/root', and may be transmitted as
   // TSQLRestServerURIString text instances
-  {$ifdef UNICODE}TSQLRestServerURI = record{$else}TSQLRestServerURI = object{$endif}
+  {$ifdef USERECORDWITHMETHODS}TSQLRestServerURI = record
+    {$else}TSQLRestServerURI = object{$endif}
   private
     function GetURI: TSQLRestServerURIString;
     procedure SetURI(const Value: TSQLRestServerURIString);
@@ -15640,7 +15669,8 @@ type
   /// used to publish all Services supported by a TSQLRestServer instance
   // - as expected by TSQLRestServer.ServicesPublishedInterfaces
   // - can be serialized as a JSON object via RecordLoadJSON/RecordSaveJSON
-  {$ifdef UNICODE}TServicesPublishedInterfaces = record{$else}TServicesPublishedInterfaces = object{$endif}
+  {$ifdef USERECORDWITHMETHODS}TServicesPublishedInterfaces = record
+    {$else}TServicesPublishedInterfaces = object{$endif}
   public
     /// how this TSQLRestServer could be accessed
     PublicURI: TSQLRestServerURI;
@@ -15824,7 +15854,7 @@ type
     // - the very same TSQLRestStorage is handled in fStaticData
     fStaticVirtualTable: TSQLRestDynArray;
     /// in-memory storage of TAuthSession instances
-    fSessions: TObjectListLocked;
+    fSessions: TSynObjectListLocked;
     fSessionsDeprecatedTix: cardinal;
     /// used to compute genuine TAuthSession.ID cardinal value
     fSessionCounter: cardinal;
@@ -16671,7 +16701,7 @@ type
 
     /// read-only access to the internal list of sessions
     // - ensure you protect its access calling Sessions.Lock/Sessions.Unlock
-    property Sessions: TObjectListLocked read fSessions;
+    property Sessions: TSynObjectListLocked read fSessions;
     /// read-only access to the list of registered server-side authentication
     // methods, used for session creation
     // - note that the exact number or registered services in this list is
@@ -17036,7 +17066,7 @@ type
     function UpdateOne(ID: TID; const Values: TSQLVarDynArray): boolean; overload; virtual;
   end;
 
-  /// class able to handle a O(1) hashed-based search of a property in a TList
+  /// class able to handle a O(1) hashed-based search of a property
   // - used e.g. to hash TSQLRestStorageInMemory field values
   TSQLRestStorageInMemoryUnique = class
   protected
@@ -17317,7 +17347,7 @@ type
     class procedure DoIndexEvent(aDest: pointer; aRec: TSQLRecord; aIndex: integer);
     /// low-level TFindWhereEqualEvent callback setting PPointer(aDest)^ := aRec.CreateCopy
     class procedure DoCopyEvent(aDest: pointer; aRec: TSQLRecord; aIndex: integer);
-    /// low-level TFindWhereEqualEvent callback calling TList(aDest).Add(aRec)
+    /// low-level TFindWhereEqualEvent callback calling TSynList(aDest).Add(aRec)
     class procedure DoAddToListEvent(aDest: pointer; aRec: TSQLRecord; aIndex: integer);
     /// read-only access to the TSQLRecord values, storing the data
     // - this returns directly the item class instance stored in memory: if you
@@ -17633,12 +17663,12 @@ type
     /// write any modification into file
     // - do nothing if file name was not assigned
     procedure UpdateToFile; virtual;
-    /// clear all internal TObjectList content
+    /// clear all internal storage content
     procedure DropDatabase; virtual;
-    /// direct access to the storage TObjectList storage instances
+    /// direct access to the storage instances
     // - you can then access to Storage[Table].Count and Storage[Table].Items[]
     property Storage[aTable: TSQLRecordClass]: TSQLRestStorageInMemory read GetStorage;
-    /// direct access to the storage TObjectList storage instances
+    /// direct access to the storage instances
     // - you can then access via Storage[TableIndex].Count and Items[]
     property Storages: TSQLRestStorageInMemoryDynArray read fStorage;
   published
@@ -18812,7 +18842,8 @@ type
 
   /// the WHERE and ORDER BY statements as set by TSQLVirtualTable.Prepare
   // - Where[] and OrderBy[] are fixed sized arrays, for fast and easy code
-  {$ifdef UNICODE}TSQLVirtualTablePrepared = record{$else}TSQLVirtualTablePrepared = object{$endif}
+  {$ifdef USERECORDWITHMETHODS}TSQLVirtualTablePrepared = record
+    {$else}TSQLVirtualTablePrepared = object{$endif}
   public
     /// number of WHERE statement parameters in Where[] array
     WhereCount: integer;
@@ -20451,12 +20482,12 @@ end;
 {$endif}
 
 type // those classes will be used to register globally some classes for JSON
-  TJSONSerializerRegisteredClassAbstract = class(TList)
+  TJSONSerializerRegisteredClassAbstract = class(TSynList)
   protected
     fLastClass: TClass;
     fSafe: TSynLocker;
   public
-    constructor Create;
+    constructor Create; override;
     destructor Destroy; override;
   end;
 
@@ -25760,7 +25791,8 @@ type
   // - code generated is very optimized: stack and memory usage, CPU registers
   // prefered, multiplication avoided to calculate memory position from index,
   // hand tuned assembler...
-  {$ifdef UNICODE}TUTF8QuickSort = record{$else}TUTF8QuickSort = object{$endif}
+  {$ifdef USERECORDWITHMETHODS}TUTF8QuickSort = record
+    {$else}TUTF8QuickSort = object{$endif}
   public
     // sort parameters
     Results: PPUtf8CharArray;
@@ -26010,7 +26042,8 @@ begin
 end;
 
 type
-  {$ifdef UNICODE}TUTF8QuickSortMulti = record{$else}TUTF8QuickSortMulti = object{$endif}
+  {$ifdef USERECORDWITHMETHODS}TUTF8QuickSortMulti = record
+    {$else}TUTF8QuickSortMulti = object{$endif}
   public
     Results: PPUtf8CharArray;
     IDColumn: PPUtf8CharArray;
@@ -26163,7 +26196,7 @@ end;
 destructor TSQLTable.Destroy;
 begin
   fOwnedRecords.Free;
-  inherited;
+  inherited Destroy;
 end;
 
 function TSQLTable.QueryRecordType: TSQLRecordClass;
@@ -26185,7 +26218,7 @@ begin
   end;
   result := RecordType.Create;
   if fOwnedRecords=nil then
-    fOwnedRecords := TObjectList.Create;
+    fOwnedRecords := TSynObjectList.Create;
   fOwnedRecords.Add(result);
 end;
 
@@ -27753,7 +27786,7 @@ begin
   // go to start of object
   P := GotoNextNotSpace(Buffer);
   if IsNotExpandedBuffer(P,Buffer+BufferLen,fFieldCount,fRowCount) then begin
-    // A. Not Expanded format
+    // A. Not Expanded (more optimized) format as array of values
 (* {"fieldCount":9,"values":["ID","Int","Test","Unicode","Ansi","ValFloat","ValWord",
     "ValDate","Next",0,0,"abcde+?ef+?+?","abcde+?ef+?+?","abcde+?ef+?+?",
     3.14159265300000E+0000,1203,"2009-03-10T21:19:36",0,..],"rowCount":20} *)
@@ -27783,7 +27816,7 @@ begin
       end;
     end;
   end else begin
-    // B. Expanded format
+    // B. Expanded format as array of objects (each with field names)
 (* [{"ID":0,"Int":0,"Test":"abcde+?ef+?+?","Unicode":"abcde+?ef+?+?","Ansi":
     "abcde+?ef+?+?","ValFloat": 3.14159265300000E+0000,"ValWord":1203,
     "ValDate":"2009-03-10T21:19:36","Next":0},{..}] *)
@@ -33823,7 +33856,7 @@ constructor TSQLRest.Create(aModel: TSQLModel);
 var cmd: TSQLRestServerURIContextCommand;
 begin
   inherited Create;
-  fPrivateGarbageCollector := TObjectList.Create;
+  fPrivateGarbageCollector := TSynObjectList.Create;
   fModel := aModel;
   for cmd := Low(cmd) to high(cmd) do
     fAcquireExecution[cmd] := TSQLRestAcquireExecution.Create;
@@ -37952,7 +37985,7 @@ begin
     FileClose(Pipe);
     exit; // only one pipe server with this name at once
   end;
-  fExportServerNamedPipeThread := TSQLRestServerNamedPipe.Create(self, PipeName);
+  fExportServerNamedPipeThread := TSQLRestServerNamedPipe.Create(self,PipeName);
   NoAJAXJSON := true; // use smaller JSON size in this not HTTP use (never AJAX)
   sleep(10); // allow the background thread to start
   result := true; // success
@@ -38109,7 +38142,7 @@ begin
   // specific server initialization
   fStatLevels := SERVERDEFAULTMONITORLEVELS;
   fVirtualTableDirect := true; // faster direct Static call by default
-  fSessions := TObjectListLocked.Create; // needed by AuthenticationRegister() below
+  fSessions := TSynObjectListLocked.Create; // needed by AuthenticationRegister() below
   fSQLAuthUserClass := TSQLAuthUser;
   fSQLAuthGroupClass := TSQLAuthGroup;
   fModel := aModel;
@@ -41710,16 +41743,19 @@ end;
 
 procedure TSQLRestServer.Timestamp(Ctxt: TSQLRestServerURIContext);
 {$ifndef NOVARIANTS}
-var info: TDocVariantData;
+  procedure DoInfo;
+  var info: TDocVariantData;
+  begin
+    info.InitFast;
+    InternalInfo(info);
+    Ctxt.Returns(info.ToJSON('','',jsonHumanReadable));
+  end;
 {$endif}
 begin
 {$ifndef NOVARIANTS}
   if IdemPropNameU(Ctxt.URIBlobFieldName,'info') and
-     not (rsoTimestampInfoURIDisable in fOptions) then begin
-    info.InitFast;
-    InternalInfo(info);
-    Ctxt.Returns(info.ToJSON('','',jsonHumanReadable));
-  end else
+     not (rsoTimestampInfoURIDisable in fOptions) then
+    DoInfo else
 {$endif}
     Ctxt.Returns(Int64ToUtf8(ServerTimestamp),HTTP_SUCCESS,TEXT_CONTENT_TYPE_HEADER);
 end;
@@ -43488,23 +43524,19 @@ constructor TSQLRestServerNamedPipe.Create(aServer: TSQLRestServer;
 begin
   fServer := aServer;
   fPipeName := PipeName;
-  fChild := TList.Create;
   inherited Create(aServer,false,false);
 end;
 
 destructor TSQLRestServerNamedPipe.Destroy;
 var i: integer;
 begin
-  for i := 0 to fChild.Count-1 do // close any still opened pipe
-    if fChild[i]<>nil then begin
-      {writeln('fChildCount=',fChildCount,' TSQLRestServerNamedPipeResponse=',
-        integer(TSQLRestServerNamedPipeResponse),'.Terminated=',
-        BoolToStr(TSQLRestServerNamedPipeResponse(fChild[i]).Terminated,true));}
-      TSQLRestServerNamedPipeResponse(fChild[i]).Terminate;
-    end;
-  while fChildCount>0 do
-    SleepHiRes(64); // wait for all TSQLRestServerNamedPipeResponse.Destroy
-  fChild.Free;
+  if fChildRunning>0 then begin
+    for i := 0 to length(fChild)-1 do // close any still opened pipe
+      if fChild[i]<>nil then
+        fChild[i].Terminate;
+    while fChildRunning>0 do
+      SleepHiRes(64); // wait for all TSQLRestServerNamedPipeResponse.Destroy
+  end;
   inherited;
 end;
 
@@ -43536,7 +43568,6 @@ begin // see http://msdn.microsoft.com/en-us/library/aa365588(v=VS.85).aspx
       if PeekNamedPipe(aPipe,nil,0,nil,@Available,nil) then
         if (Available>=4) then begin
           // PeekNamedPipe() made an implicit ConnectNamedPipe(aPipe,nil)
-          InterlockedIncrement(fChildCount);
           TSQLRestServerNamedPipeResponse.Create(fServer,self,aPipe);
           aPipe := 0; // aPipe will be closed in TSQLRestServerNamedPipeResponse
           break;
@@ -43550,6 +43581,28 @@ begin // see http://msdn.microsoft.com/en-us/library/aa365588(v=VS.85).aspx
   end;
 end;
 
+procedure TSQLRestServerNamedPipe.AddChild(new: TSQLRestServerNamedPipeResponse);
+var i: integer;
+begin
+  InterlockedIncrement(fChildRunning);
+  i := ObjArrayFind(fChild,nil); // any free slot?
+  if i<0 then
+    ObjArrayAdd(fChild,new) else
+    fChild[i] := new;
+end;
+
+procedure TSQLRestServerNamedPipe.RemoveChild(new: TSQLRestServerNamedPipeResponse);
+var i: integer;
+begin
+  if self=nil then
+    exit;
+  new.fMasterThread := self;
+  i := ObjArrayFind(fChild,new);
+  if i>=0 then
+    fChild[i] := nil; // reuse slot
+  InterlockedDecrement(fChildRunning);
+end;
+
 
 { TSQLRestServerNamedPipeResponse }
 
@@ -43557,28 +43610,19 @@ constructor TSQLRestServerNamedPipeResponse.Create(aServer: TSQLRestServer;
   aMasterThread: TSQLRestServerNamedPipe; aPipe: cardinal);
 begin
   fServer := aServer;
-  fMasterThread := aMasterThread;
-  with fMasterThread.fChild do begin
-    fMasterThreadChildIndex := IndexOf(nil); // get free position in fChild[]
-    if fMasterThreadChildIndex<0 then
-      fMasterThreadChildIndex := Add(self) else
-      Items[fMasterThreadChildIndex] := self;
-  end;
   fPipe := aPipe;
 {$ifdef LVCL}
   FOnTerminate := fServer.EndCurrentThread;
 {$endif}
+  fMasterThread := aMasterThread;
+  fMasterThread.AddChild(self);
   FreeOnTerminate := true;
   inherited Create(fServer,false,false);
 end;
 
 destructor TSQLRestServerNamedPipeResponse.Destroy;
 begin
-  if fMasterThread<>nil then
-    with fMasterThread do begin
-      fChild[fMasterThreadChildIndex] := nil;
-      InterlockedDecrement(fChildCount);
-    end;
+  fMasterThread.RemoveChild(self);
   inherited;
 end;
 
@@ -43599,7 +43643,7 @@ begin
   Sleeper := 0;
   ClientTimeOut64 := GetTickCount64+30*60*1000; // disconnect after 30 min idle
   try
-    while not Terminated do
+    while not Terminated and not fMasterThread.Terminated do
     if // (WaitForSingleObject(fPipe,200)=WAIT_OBJECT_0)  = don't wait
        PeekNamedPipe(fPipe,nil,0,nil,@Available,nil) and (Available>=4) then begin
       FileRead(fPipe,Code,4);
@@ -45450,7 +45494,7 @@ var P: TSQLPropInfo;
     WhereValueString, SetValueString, SetValueJson: RawUTF8;
     i, WhereFieldIndex: PtrInt;
     SetValueWasString: boolean;
-    match: TList;
+    match: TSynList;
     rec: TSQLRecord;
 begin
   result := false;
@@ -45484,7 +45528,7 @@ begin
     UnQuoteSQLStringVar(pointer(WhereValue),WhereValueString) else
     WhereValueString := WhereValue;
   // search indexes, then apply updates
-  match := TList.Create;
+  match := TSynList.Create;
   StorageLock(true,'EngineUpdateField');
   try
     // find matching match[]
@@ -45787,7 +45831,7 @@ end;
 function TSQLRestStorageInMemory.SearchField(const FieldName, FieldValue: RawUTF8;
   out ResultID: TIDDynArray): boolean;
 var n, WhereField,i: integer;
-    match: TList;
+    match: TSynList;
 begin
   result := false;
   if (self=nil) or (fCount=0) then
@@ -45799,7 +45843,7 @@ begin
       exit;
     inc(WhereField); // FindWhereEqual() expects index = RTTI+1
   end;
-  match := TList.Create;
+  match := TSynList.Create;
   try
     StorageLock(false,'SearchField');
     try
@@ -45870,7 +45914,7 @@ class procedure TSQLRestStorageInMemory.DoAddToListEvent(aDest: pointer;
   aRec: TSQLRecord; aIndex: integer);
 begin
   if aDest<>nil then
-    TList(aDest).Add(aRec);
+    TSynList(aDest).Add(aRec);
 end;
 
 class procedure TSQLRestStorageInMemory.DoInstanceEvent(aDest: pointer;
@@ -46685,7 +46729,7 @@ begin
 end;
 
 procedure TSQLRestServerFullMemory.LoadFromFile;
-var S: TFileStream;
+var S: THandleStream;
 begin
   if (fFileName='') or not FileExists(fFileName) then
     exit;
@@ -46774,7 +46818,7 @@ function TSQLRestServerFullMemory.EngineAdd(TableModelIndex: integer;
   const SentData: RawUTF8): TID;
 begin
   result := fStorage[TableModelIndex].EngineAdd(TableModelIndex,SentData);
-  InternalState := InternalState+1;
+  inc(InternalState);
 end;
 
 function TSQLRestServerFullMemory.EngineRetrieve(TableModelIndex: integer; ID: TID): RawUTF8;
@@ -48044,8 +48088,8 @@ begin // see [22ce911c715]
 end;
 
 type
-  /// wrapper class to ease JSONToObject() maintainability
-  {$ifdef UNICODE}TJSONToObject = record{$else}TJSONToObject = object{$endif}
+  /// wrapper object to ease JSONToObject() maintainability
+  TJSONToObject = object
   public
     // input parameters
     From: PUTF8Char;
@@ -48058,11 +48102,11 @@ type
     procedure Parse;
   private
     ValueClass: TClass;
-    IsObj: TJSONObject;
     parser: PJSONCustomParser;
     PropName, PropValue: PUTF8Char;
     PropNameLen, PropValueLen: integer;
     P: PPropInfo;
+    IsObj: TJSONObject;
     Kind: TTypeKind;
     EndOfObject: AnsiChar;
     NestedValid, wasString: boolean;
@@ -48088,7 +48132,7 @@ begin
   parser.Value := TObject(ObjectInstance);
   parser.Parse;
   Valid := parser.Valid;
-  TObject(ObjectInstance) := parser.Value; // 'null' -> FreeAndNil()
+  TObject(ObjectInstance) := parser.Value; // e.g. 'null' -> FreeAndNil()
   result := parser.Dest;
 end;
 
@@ -53065,7 +53109,7 @@ const
   REGX7 = 8;
   PARAMREG_FIRST = REGX0;
   PARAMREG_LAST = REGX7;
-  PARAMREG_RESULT = REGX0; // is really REGX1 self?
+  PARAMREG_RESULT = REGX1;
   // 64-bit floating-point (double) registers
   REGD0 = 1; // map REGV0 128-bit NEON register
   REGD1 = 2; // REGV1
@@ -53324,15 +53368,15 @@ var method: PServiceMethod;
       if ValueType>smvSelf then begin
         {$ifdef HAS_FPREG} // x64, arm, aarch64
         if FPRegisterIdent>0 then
-          V := Pointer((PtrUInt(@aCall.FPRegs[FPREG_FIRST])+SizeOf(Double)*PtrUInt(FPRegisterIdent-1))) else
+          V := @aCall.FPRegs[FPREG_FIRST+FPRegisterIdent-1]
+        else
         if RegisterIdent>0 then
-          V := Pointer((PtrUInt(@aCall.ParamRegs[PARAMREG_FIRST])+SizeOf(pointer)*PtrUInt(RegisterIdent-1))) else
+          V := @aCall.ParamRegs[PARAMREG_FIRST+RegisterIdent-1]
+        else
         {$endif}
           V := nil;
-        {$ifndef CPUAARCH64} // on aarch64, reference result can be in PARAMREG_FIRST
         if RegisterIdent=PARAMREG_FIRST then
            RaiseError('unexpected self',[]);
-        {$endif}
         {$ifdef CPUX86}
         case RegisterIdent of
         REGEAX: RaiseError('unexpected self',[]);
@@ -53436,25 +53480,6 @@ begin
      forged to call a remote SOA server or mock/stub an interface
   *)
   self := SelfFromInterface;
-  {$ifdef CPUAARCH64}
-  // alf: on aarch64, the self is sometimes only available in x1, when we have a result pointer !
-  // try to detect this ... although not very elegant, but I do not yet know how else to do this
-  try
-    if (fFactory=nil) or (fFactory.fDetectX0ResultMagic<>$AAAAAAAA) then begin
-      // aha, we have a reference result, placed in X0, so self is in X1 !!
-      self := aCall.ParamRegs[REGX1];
-      self := SelfFromInterface;
-      if fFactory.fDetectX0ResultMagic<>$AAAAAAAA then
-         raise EInterfaceFactoryException.CreateUTF8('Self error',[]);
-    end;
-  except
-    // if the above fails due to some error, we are definitely sure that the self is in REGX1 !!
-    self := aCall.ParamRegs[REGX1];
-    self := SelfFromInterface;
-    if fFactory.fDetectX0ResultMagic<>$AAAAAAAA then
-       raise EInterfaceFactoryException.CreateUTF8('Self error',[]);
-  end;
-  {$endif}
   if aCall.MethodIndex>=fFactory.fMethodsCount then
     raise EInterfaceFactoryException.CreateUTF8(
       '%.FakeCall(%.%) failed: out of range method %>=%',[self,
@@ -53708,12 +53733,12 @@ begin
 end;
 
 var
-  InterfaceFactoryCache: TObjectListLocked;
+  InterfaceFactoryCache: TSynObjectListLocked;
 
 procedure EnterInterfaceFactoryCache;
 begin
   if InterfaceFactoryCache=nil then
-    GarbageCollectorFreeAndNil(InterfaceFactoryCache,TObjectListLocked.Create);
+    GarbageCollectorFreeAndNil(InterfaceFactoryCache,TSynObjectListLocked.Create);
   InterfaceFactoryCache.Safe.Lock;
 end;
 
@@ -53725,7 +53750,7 @@ begin
     raise EInterfaceFactoryException.CreateUTF8('%.Get(nil)',[self]);
   EnterInterfaceFactoryCache;
   try
-    F := @InterfaceFactoryCache.List[0];
+    F := pointer(InterfaceFactoryCache.List);
     for i := 1 to InterfaceFactoryCache.Count do
        if F^.fInterfaceTypeInfo=aInterface then begin
         result := F^;
@@ -53767,7 +53792,7 @@ var i,ga: PtrInt;
 begin
   if InterfaceFactoryCache<>nil then begin
     InterfaceFactoryCache.Safe.Lock;
-    F := @InterfaceFactoryCache.List[0];
+    F := pointer(InterfaceFactoryCache.List);
     ga := GUID32.a;
     for i := 1 to InterfaceFactoryCache.Count do
     with PGUID32(@F^.fInterfaceIID)^ do
@@ -53832,7 +53857,7 @@ begin
   if (InterfaceFactoryCache<>nil) and (L<>0) then begin
     InterfaceFactoryCache.Safe.Lock;
     try
-      F := @InterfaceFactoryCache.List[0];
+      F := pointer(InterfaceFactoryCache.List);
       for i := 1 to InterfaceFactoryCache.Count do
         if IdemPropName(F^.fInterfaceTypeInfo^.Name,pointer(aInterfaceName),L) then begin
           result := F^;
@@ -53845,7 +53870,7 @@ begin
   end;
 end;
 
-class function TInterfaceFactory.GetUsedInterfaces: TObjectListLocked;
+class function TInterfaceFactory.GetUsedInterfaces: TSynObjectListLocked;
 begin
   result := InterfaceFactoryCache;
 end;
@@ -53891,9 +53916,6 @@ begin
   {$ifndef NOVARIANTS}
   fDocVariantOptions := JSON_OPTIONS_FAST;
   {$endif NOVARIANTS}
-  {$ifdef CPUAARCH64}
-  fDetectX0ResultMagic := $AAAAAAAA; // alf: see comment above
-  {$endif CPUAARCH64}
   fInterfaceTypeInfo := aInterface;
   fInterfaceIID := aInterface^.InterfaceGUID^;
   if IsNullGUID(fInterfaceIID) then
@@ -57215,8 +57237,8 @@ begin
   if self=nil then
     exit;
   if fFakeCallbacks=nil then
-    fFakeCallbacks := TObjectListLocked.Create(false);
-  fFakeCallbacks.SafeAdd(aFakeInstance);
+    fFakeCallbacks := TSynObjectListLocked.Create(false);
+  fFakeCallbacks.Add(aFakeInstance);
 end;
 
 procedure TServiceContainerServer.FakeCallbackRemove(aFakeInstance: TObject);
@@ -57461,11 +57483,11 @@ type
   {$PACKRECORDS 16}
   {$endif}
   TCallMethodArgs = record
-    StackSize: integer;
+    StackSize: PtrInt;
     StackAddr, method: PtrInt;
-    ParamRegs: packed array[PARAMREG_FIRST..PARAMREG_LAST] of PtrInt;
+    ParamRegs: array[PARAMREG_FIRST..PARAMREG_LAST] of PtrInt;
     {$ifdef HAS_FPREG}
-    FPRegs: packed array[FPREG_FIRST..FPREG_LAST] of Double;
+    FPRegs: array[FPREG_FIRST..FPREG_LAST] of Double;
     {$endif}
     res64: Int64Rec;
     resKind: TServiceMethodValueType;
@@ -57497,6 +57519,9 @@ asm
    //lr    14          link address / scratch register
    //pc    15          program counter
 
+   // sometimes, the entry-point is not exact ... give some room for errors
+   nop
+   nop
    // prolog
    mov	 ip, sp // sp is the stack pointer ; ip is the Intra-Procedure-call scratch register
    stmfd sp!, {v1, v2, sb, sl, fp, ip, lr, pc}
@@ -57535,7 +57560,16 @@ load_regs:
    vldr  d6, [v2,#TCallMethodArgs.FPRegs+REGD6*8-8]
    vldr  d7, [v2,#TCallMethodArgs.FPRegs+REGD7*8-8]
    ldr   v1, [v2,#TCallMethodArgs.method]
+   {$ifdef CPUARM_HAS_BLX}
    blx   v1
+   {$else}
+   mov lr, pc
+   {$ifdef CPUARM_HAS_BX}
+   bx  v1
+   {$else}
+   mov pc, v1
+   {$endif}
+   {$endif}
    str   a1, [v2,#TCallMethodArgs.res64.Lo]
    str   a2, [v2,#TCallMethodArgs.res64.Hi]
    ldr   a3, [v2,#TCallMethodArgs.resKind]
@@ -57562,13 +57596,18 @@ asm
    // fp       x29
    // lr       x30
    // sp       sp
-   stp	fp, lr, [sp, #-16]!
-   stp	x19, x20, [sp, #-16]!
-   mov	fp, sp
+
+   // sometimes, the entry-point is not exact ... give some room for errors
+   nop
+   nop
+   // prolog
+   stp  x29, x30, [sp, #-16]!
+   mov  x29, sp
+   stp  x19, x19, [sp, #-16]!
    // make space on stack
    sub	sp, sp, #MAX_EXECSTACK
+   //and  sp, sp, #-16   // Always align sp.
    mov  x19, Args
-   ldr  x20, [x19,#TCallMethodArgs.method]
    // prepare to copy (push) stack content (if any)
    ldr  x2, [x19,#TCallMethodArgs.StackSize]
    // if there is no stack content, do nothing
@@ -57610,24 +57649,24 @@ load_regs:
    ldr  d6, [x19,#TCallMethodArgs.FPRegs+REGD6*8-8]
    ldr  d7, [x19,#TCallMethodArgs.FPRegs+REGD7*8-8]
    // call TCallMethodArgs.method
-   blr  x20
+   ldr  x15, [x19,#TCallMethodArgs.method]
+   blr  x15
    // store normal result
    str  x0, [x19, #TCallMethodArgs.res64]
-   ldr  x20, [x19, #TCallMethodArgs.resKind]
-   cmp  x20, smvDouble
+   ldr  x15, [x19, #TCallMethodArgs.resKind]
+   cmp  x15, smvDouble
    b.eq float_result
-   cmp  x20, smvDateTime
+   cmp  x15, smvDateTime
    b.eq float_result
-   cmp  x20, smvCurrency
+   cmp  x15, smvCurrency
    b.ne asmcall_end
    // store double result in res64
 float_result:
    str  d0, [x19,#TCallMethodArgs.res64]
 asmcall_end:
-   // give back space on stack (add sp,sp,#MAX_EXECSTACK)
-   mov	sp, fp
-   ldp	x19, x20, [sp], #16
-   ldp	fp, lr, [sp], #16
+   add  sp, sp, #MAX_EXECSTACK
+   ldr  x19,[sp], #16
+   ldp  x29,x30,[sp], #16
    ret
 end;
 {$endif CPUAARCH64}
@@ -57651,7 +57690,7 @@ asm
         // get Args
         mov     r12, Args
         // copy (push) stack content (if any)
-        mov     ecx, [r12].TCallMethodArgs.StackSize
+        mov     rcx, [r12].TCallMethodArgs.StackSize
         mov     rdx, [r12].TCallMethodArgs.StackAddr
         jmp     @checkstack
 @addstack:
@@ -60154,17 +60193,8 @@ begin
         end;
       end;
       // prepare the low-level call context for the asm stub
-      {$ifndef CPUAARCH64}
+      //Pass the Self (also named $this)
       call.ParamRegs[PARAMREG_FIRST] := PtrInt(Instances[i]);
-      {$else}
-      // alf note for FPC on Linux aarch64:
-      // the above is not true for aarch64, when a function result is a pointer
-      // the function result pointer is placed in REGX0 and self in REGX1
-      // thus, in that case: call.ParamRegs[REGX1] := PtrInt(Instances[i]);
-       if call.ParamRegs[PARAMREG_FIRST]=0 then
-          call.ParamRegs[PARAMREG_FIRST] := PtrInt(Instances[i]) else
-          call.ParamRegs[REGX1] := PtrInt(Instances[i]);
-      {$endif}
       call.method := PPtrIntArray(PPointer(Instances[i])^)^[ExecutionMethodIndex];
       if ArgsResultIndex>=0 then
         call.resKind := Args[ArgsResultIndex].ValueType else

@@ -167,7 +167,9 @@ begin
   REPFOSSIL := dev + 'fossil/lib';
   REPLIB := dev + 'lib';
   REPGITHUB := dev + 'github/';
-{$endif}
+  btnFossilShell.caption := 'Fossil diff';
+  btnGitShell.caption := 'Git diff';
+{$endif MSWINDOWS}
   fBatPath := ExeVersion.ProgramFilePath;
   if not FileExists(fBatPath + 'FossilStatus' + SHELL) then // from exe sub-folder?
     fBatPath := ExtractFilePath(ExcludeTrailingPathDelimiter(fBatPath));
@@ -238,7 +240,7 @@ begin
   inc(VersionNumber);
   VersionText := '''' + VERSION + '.' + UInt32ToUtf8(VersionNumber) + ''''#13#10;
   FileFromString(VersionText, fDevPath + PathDelim +'SynopseCommit.inc');
-  FileFromString(VersionText, fFossilRepository + PathDelim +'SynopseCommit.inc');
+  FileFromString(VersionText, fFossilRepository + PathDelim + 'SynopseCommit.inc');
   DescFile := fBatPath + 'desc.txt';
   FileFromString('{' + ToUTF8(VersionNumber) + '} ' + Desc, DescFile);
   Exec(fFossilRepository, 'FossilCommit', DescFile, IntToStr(ord(chkFossilPush.Checked)), fFossilRepository, '', '');
@@ -248,8 +250,8 @@ end;
 procedure TMainForm.btnGitSynchClick(Sender: TObject);
 var
   Desc, status: string;
-  DescFile, BatchFile: TFileName;
-  i: integer;
+  DescFile, BatchFile, GitHub: TFileName;
+  i,n: integer;
 begin
   Desc := trim(mmoDescription.Text);
   if Desc = '' then begin
@@ -289,6 +291,19 @@ begin
   end;
   DescFile := fBatPath + 'desc.txt';
   FileFromString(Desc, DescFile);
+  GitHub := ExtractFilePath(fGitRepository);
+  n := 0;
+  if (Sender = btnGitAll) or (Sender = btnSynProject) then
+    inc(n,SynchFolders(fFossilRepository, GitHub + 'SynProject', true, true, true));
+  if (Sender = btnGitAll) or (Sender = btnSynPdf) then
+    inc(n,SynchFolders(fFossilRepository, GitHub + 'SynPDF', false, true, true));
+  if (Sender = btnGitAll) or (Sender = btnDMustache) then
+    inc(n,SynchFolders(fFossilRepository, GitHub + 'dmustache', false, true, true));
+  if (Sender = btnGitAll) or (Sender = btnLVCL) then
+    inc(n,SynchFolders(fFossilRepository, GitHub + 'LVCL', false, true, true));
+  if (Sender = btnGitAll) or (Sender = btnGitSynch) then
+    inc(n,SynchFolders(fFossilRepository, GitHub + 'mORMot', true, true, true));
+  {$I-} Writeln(n,' file(s) synched to GitHub'#13#10); {$I+}
   if Sender = btnGitAll then
     BatchFile := 'GitCommitAll'
   else if Sender = btnSynProject then

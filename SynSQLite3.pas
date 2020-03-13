@@ -2687,7 +2687,7 @@ type
     fLog: TSynLogClass;
     {$endif}
     /// store TSQLDataBaseSQLFunction instances
-    fSQLFunctions: TObjectList;
+    fSQLFunctions: TSynObjectList;
     function GetUseCache: boolean;
     procedure SetUseCache(const Value: boolean);
     procedure SetBusyTimeout(const ms: Integer);
@@ -3903,7 +3903,7 @@ begin
     fIsMemory := true else
     fFileNameWithoutPath := ExtractFileName(fFileName);
   fPassword := aPassword;
-  fSQLFunctions := TObjectList.Create;
+  fSQLFunctions := TSynObjectList.Create;
   result := DBOpen;
   if result<>SQLITE_OK then
     raise ESQLite3Exception.Create(fDB,result,'DBOpen');
@@ -4032,8 +4032,7 @@ begin
     UnLock;
     {$ifdef WITHLOG}
     if not NoLog then
-      fLog.Add.Log(sllSQL,'% % returned % for %',
-        [Timer.Stop,FileNameWithoutPath,ID,aSQL],self);
+      fLog.Add.Log(sllSQL,'% % returned % for %',[Timer.Stop,FileNameWithoutPath,ID,aSQL],self);
     {$endif}
   end;
 end;
@@ -4231,7 +4230,7 @@ end;
 
 function IsCacheable(const aSQL: RawUTF8): boolean;
 begin
-  result := isSelect(pointer(aSQL)) and (PosEx(SQLDATABASE_NOCACHE, aSQL) = 0);
+  result := isSelect(pointer(aSQL)) and (PosEx(SQLDATABASE_NOCACHE,aSQL)=0);
 end;
 
 procedure TSQLDataBase.Lock(const aSQL: RawUTF8);
@@ -4734,7 +4733,7 @@ begin
   if self=nil then
     exit;
   if InternalState<>nil then
-    inc(InternalState^);
+    inc(InternalState^); 
   if fCache.Reset then
    {$ifdef WITHLOG}
     if fLog<>nil then
@@ -5694,7 +5693,11 @@ begin
         if fStepSynLzCompress then begin
           NotifyProgressAndContinue(backupStepSynLz);
           fn2 := ChangeFileExt(fn, '.db.tmp');
-          if not (RenameFile(fn,fn2) and TSQLDatabase.BackupSynLZ(fn2,fn,true)) then
+          DeleteFile(fn2);
+          if not RenameFile(fn,fn2)  then
+            raise ESQLite3Exception.CreateUTF8('%.Execute: RenameFile(%,%) failed',
+              [self,fn,fn2]);
+          if not TSQLDatabase.BackupSynLZ(fn2,fn,true) then
             raise ESQLite3Exception.CreateUTF8('%.Execute: BackupSynLZ(%,%) failed',
               [self,fn,fn2]);
           {$ifdef WITHLOG}
