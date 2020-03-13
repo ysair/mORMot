@@ -178,7 +178,6 @@
   {$define HASUINT64}
   {$define HASINLINENOTX86}
   {$define NODELPHIASM}   // ignore low-level System.@LStrFromPCharLen calls
-  {$define HASAESNI}    // should be commented to test project with valgrind
   {$define HASTTHREADSTART}
   {$define HASINTERFACEASTOBJECT}
   {$define EXTENDEDTOSTRING_USESTR} // FloatToText uses str() in FPC
@@ -186,7 +185,9 @@
   {$define FPC_OR_PUREPASCAL}
   {$define FPC_OR_KYLIX}
   {$define FPC_OR_UNICODE}
+  {$define USERECORDWITHMETHODS}
   {$define FPC_OR_DELPHIXE}
+  {$define FPC_OR_DELPHIXE4}
   {$define FPC_ENUMHASINNER}
 
   // $if FPC_FULLVERSION>20700 breaks Delphi 6-7 and SynProject :(
@@ -257,7 +258,11 @@
     {$ifdef CPUARM}
       {$define FPCSQLITE3STATIC} // use static/arm-linux\sqlite3.o
     {$endif}
-    // note: problems with current static/aarch64-linux\sqlite3.o
+    {$ifdef CPUAARCH64}
+      {$ifdef ANDROID}
+        {$define FPCSQLITE3STATIC} // note: problems with current static/aarch64-linux\sqlite3.o
+      {$endif}
+    {$endif}
   {$endif}
 
   {$ifdef BSD}
@@ -298,21 +303,27 @@
       {$define CPUINTEL}
       {$define FPC_CPUINTEL}
       {$ifndef DARWIN}
-        {$define CPUX64ASM} // Delphi XE4 SSE asm is buggy :(
+        {$define CPUX64ASM} // Delphi XE4 or Darwin asm are buggy :(
+        {$define HASAESNI}  // SynCrypto rejected by Darwin asm
       {$endif DARWIN}
       {$define FPC_X64}   // supports AVX/AVX2/AVX512 - which Delphi doesn't
       {$ASMMODE INTEL}    // to share asm code with Delphi
     {$endif CPUX64}
+    {$ifdef CPUAARCH64}
+      {$define CPUARM3264}
+    {$endif CPUAARCH64}
   {$else}
     {$define FPC_32}
     {$ifdef CPUARM}
       {$define PUREPASCAL} // ARM32
+      {$define CPUARM3264}
     {$endif CPUARM}
     {$ifdef CPUX86}
       {$define CPUINTEL}
       {$define FPC_CPUINTEL}
       {$define FPC_X86}
-      {$ASMMODE INTEL} // as Delphi expects
+      {$ASMMODE INTEL}   // as Delphi expects
+      {$define HASAESNI} // should be commented to test project with valgrind
       {$ifndef FPC_PIC}
         {$define CPUX86NOTPIC} // use "absolute" instead of local register
       {$endif FPC_PIC}
@@ -390,6 +401,7 @@
     {$define HASVARUSTRING}
     {$define HASCODEPAGE}
     {$define FPC_OR_UNICODE}
+    {$define USERECORDWITHMETHODS}
     { due to a bug in Delphi 2009+, we need to fake inheritance of record,
       since TDynArrayHashed = object(TDynArray) fails to initialize
       http://blog.synopse.info/post/2011/01/29/record-and-object-issue-in-Delphi-2010 }
@@ -474,8 +486,6 @@
       {$ifend}
       {$if CompilerVersion = 20}
         {$define ISDELPHI20092010} // specific compilation issues
-        // for Delphi 2009 and up, use UNICODE conditional
-        {$define FPC_OR_UNICODE}
       {$ifend}
       {$if CompilerVersion = 21}
         {$define ISDELPHI20092010} //specific compilation issues
@@ -484,7 +494,6 @@
         {$define ISDELPHI2010}
         {$define ISDELPHI2010_OR_FPC} // eltype2 field
         {$define ISDELPHI2010_OR_FPC_NEWRTTI}
-        {$define FPC_OR_UNICODE}
         {$define HASTTHREADSTART}
         {$define HASINTERFACEASTOBJECT}
         {$ifdef NEWRTTINOTUSED} // option reduce EXE size by disabling much RTTI
@@ -508,6 +517,7 @@
       {$ifend}
       {$if CompilerVersion >= 25.0}
         {$define ISDELPHIXE4}
+        {$define FPC_OR_DELPHIXE4} // circumvent Internal Error: C2130 on XE3
         {$define HASAESNI}
       {$ifend}
       {$if CompilerVersion >= 26.0}

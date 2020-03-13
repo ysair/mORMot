@@ -69,24 +69,21 @@ type
 
 {$ifdef HASALIGNTYPEDATA}
 function AlignTypeData(p: pointer): pointer; inline;
-{$else}
-type
-  AlignTypeData = pointer;
-{$endif HASALIGNTYPEDATA}
-
-{$ifdef HASALIGNTYPEDATA}
 function AlignTypeDataClean(p: pointer): pointer; inline;
 {$else}
 type
+  AlignTypeData = pointer;
   AlignTypeDataClean = pointer;
 {$endif HASALIGNTYPEDATA}
 
 
 {$ifdef FPC_REQUIRES_PROPER_ALIGNMENT}
 function AlignToPtr(p: pointer): pointer; inline;
+function AlignPTypeInfo(p: pointer): pointer; inline;
 {$else FPC_REQUIRES_PROPER_ALIGNMENT}
 type
   AlignToPtr = pointer;
+  AlignPTypeInfo = pointer;
 {$endif FPC_REQUIRES_PROPER_ALIGNMENT}
 
 type
@@ -156,6 +153,7 @@ end;
 {$endif FPC_REQUIRES_PROPER_ALIGNMENT}
 
 {$ifdef FPC_REQUIRES_PROPER_ALIGNMENT} // copied from latest typinfo.pp
+
 function AlignTypeDataClean(p: pointer): pointer;
 {$packrecords c}
   type
@@ -171,6 +169,20 @@ begin
     result := Pointer(align(p,PtrInt(@TAlignCheck(nil^).q)));
   {$endif VER3_0}
 end;
+
+function AlignPTypeInfo(p: pointer): pointer; inline;
+{$packrecords c}
+  type
+    TAlignCheck = record
+      b : byte;
+      p : pointer;
+    end;
+{$packrecords default}
+begin
+  Result := Pointer(align(p,PtrInt(@TAlignCheck(nil^).p)))
+
+end;
+
 {$else}
 {$ifdef HASALIGNTYPEDATA}
 function AlignTypeDataClean(p: pointer): pointer;
@@ -178,7 +190,7 @@ begin
   result := p;
 end;
 {$endif HASALIGNTYPEDATA}
-{$endif FPC_REQUIRES_PROPER_ALIGNMENT}
 
+{$endif FPC_REQUIRES_PROPER_ALIGNMENT}
 
 end.
