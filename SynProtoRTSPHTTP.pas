@@ -254,7 +254,8 @@ var
 
   procedure PendingDelete(i: integer; const reason: RawUTF8);
   begin
-    log.Log(sllDebug, 'ConnectionCreate rejected %', [reason], self);
+    if log<>nil then
+      log.Log(sllDebug, 'ConnectionCreate rejected %', [reason], self);
     fPendingGet.Delete(i);
   end;
 
@@ -406,7 +407,7 @@ begin // here we follow the steps and content stated by https://goo.gl/CX6VA3
           'Cache-Control: no-cache'#13#10#13#10);
         get.SockRecvLn(text);
         test.Check(text = 'HTTP/1.0 200 OK');
-        get.GetHeader;
+        get.GetHeader(false);
         test.Check(connectionClose in get.HeaderFlags);
         test.Check(get.SockConnected);
         test.Check(get.ContentType = RTSP_MIME);
