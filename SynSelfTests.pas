@@ -4386,6 +4386,8 @@ begin
   CheckEqual(TestAddFloatStr('12.3e 230'),'12.3e');
   CheckEqual(TestAddFloatStr('12.3f230'),'12.3');
   CheckEqual(TestAddFloatStr('12.3E23.0'),'12.3E23');
+  CheckEqual(TestAddFloatStr('-.01'),'-0.01'); // ODBC numeric output
+  CheckEqual(TestAddFloatStr('.0002'),'0.0002'); // ODBC numeric output
   CheckEqual(OctToBin(''),'');
   CheckEqual(OctToBin('123'),'123');
   CheckEqual(OctToBin('\\123'),'\123');
@@ -4514,9 +4516,68 @@ begin
   Check(u='40640.5028819444',u);
   e := 40640.5028819444;
   CheckSame(d,e,1e-11);
+  Check(IsAnsiCompatible('t'));
+  Check(IsAnsiCompatible('te'));
+  Check(IsAnsiCompatible('tes'));
+  Check(IsAnsiCompatible('test'));
+  Check(IsAnsiCompatible('teste'));
   CheckDoubleToShort(0,'0');
   CheckDoubleToShort(1,'1');
   CheckDoubleToShort(-1,'-1');
+  CheckDoubleToShort(0.1,'0.1');
+  CheckDoubleToShort(0.01,'0.01');
+  CheckDoubleToShort(0.001,'0.001');
+  CheckDoubleToShort(0.0001,'0.0001');
+  CheckDoubleToShort(-0.1,'-0.1');
+  CheckDoubleToShort(-0.01,'-0.01');
+  CheckDoubleToShort(-0.001,'-0.001');
+  CheckDoubleToShort(-0.0001,'-0.0001');
+  CheckDoubleToShort(1.1,'1.1');
+  CheckDoubleToShort(1.01,'1.01');
+  CheckDoubleToShort(1.001,'1.001');
+  CheckDoubleToShort(1.0001,'1.0001');
+  CheckDoubleToShort(1.00001,'1.00001');
+  CheckDoubleToShort(-1.1,'-1.1');
+  CheckDoubleToShort(-1.01,'-1.01');
+  CheckDoubleToShort(-1.001,'-1.001');
+  CheckDoubleToShort(-1.0001,'-1.0001');
+  CheckDoubleToShort(-1.00001,'-1.00001');
+  CheckDoubleToShort(7,'7');
+  CheckDoubleToShort(-7,'-7');
+  CheckDoubleToShort(0.7,'0.7');
+  CheckDoubleToShort(0.07,'0.07');
+  CheckDoubleToShort(0.007,'0.007');
+  CheckDoubleToShort(0.0007,'0.0007');
+  CheckDoubleToShort(-0.7,'-0.7');
+  CheckDoubleToShort(-0.07,'-0.07');
+  CheckDoubleToShort(-0.007,'-0.007');
+  CheckDoubleToShort(-0.0007,'-0.0007');
+  CheckDoubleToShort(7.7,'7.7');
+  CheckDoubleToShort(7.07,'7.07');
+  CheckDoubleToShort(7.007,'7.007');
+  CheckDoubleToShort(7.0007,'7.0007');
+  CheckDoubleToShort(7.00007,'7.00007');
+  CheckDoubleToShort(-7.7,'-7.7');
+  CheckDoubleToShort(-7.07,'-7.07');
+  CheckDoubleToShort(-7.007,'-7.007');
+  CheckDoubleToShort(-7.0007,'-7.0007');
+  CheckDoubleToShort(-7.00007,'-7.00007');
+  {$ifdef FPC}
+  CheckDoubleToShort(0.00001,'0.00001');
+  CheckDoubleToShort(-0.00001,'-0.00001');
+  CheckDoubleToShort(0.00007,'0.00007');
+  CheckDoubleToShort(-0.00007,'-0.00007');
+  {$endif FPC}
+  CheckDoubleToShort(11111.1,'11111.1');
+  CheckDoubleToShort(11111.01,'11111.01');
+  CheckDoubleToShort(11111.001,'11111.001');
+  CheckDoubleToShort(11111.0001,'11111.0001');
+  CheckDoubleToShort(11111.00001,'11111.00001');
+  CheckDoubleToShort(-11111.1,'-11111.1');
+  CheckDoubleToShort(-11111.01,'-11111.01');
+  CheckDoubleToShort(-11111.001,'-11111.001');
+  CheckDoubleToShort(-11111.0001,'-11111.0001');
+  CheckDoubleToShort(-11111.00001,'-11111.00001');
   CheckDoubleToShort(0.9999999999999997,'1');
   CheckDoubleToShort(-0.9999999999999997,'-1');
   CheckDoubleToShort(9.999999999999997,'10');
@@ -4593,10 +4654,6 @@ begin
   Check(ident[1]='x');
   Check(ident[2]='Ftiti');
   Check(ident[3]='Uboat');
-  {$endif}
-  {$ifndef LVCL}
-  {$ifdef ISDELPHIXE}FormatSettings.{$endif}{$ifdef FPC}FormatSettings.{$endif}
-    DecimalSeparator := '.';
   {$endif}
   Check(xxHash32(0,'A',1)=275094093);
   Check(xxHash32(0,'ABACK',5)=314231639);
@@ -4679,6 +4736,7 @@ begin
     u := string(a);
     CheckEqual(TestAddFloatStr(s),s);
     Check(SysUtils.IntToStr(k)=u);
+    Check(IsAnsiCompatible(s));
     Check(Int64ToUtf8(k)=s);
     Check(IntToString(k)=u);
     Check(format('%d',[k])=u);
@@ -5393,6 +5451,10 @@ procedure TTestLowLevelCommon.Iso8601DateAndTime;
     Check(Abs(D-E)<(1/SecsPerDay)); // we allow 999 ms error
     I.From(D);
     Check(Iso8601ToTimeLog(s)=I.Value);
+    t := s;
+    t[11] := ''''; // as in SynDB VArray[] quoted parameters
+    J.From(pointer(t),10);
+    Check(I.Value and not(1 shl (6+6+5)-1)=J.Value);
     I.From(s);
     t := I.Text(Expanded);
     if t<>s then // we allow error on time = 00:00:00 -> I.Text = just date
@@ -12504,7 +12566,7 @@ begin
   Check(dlo+dhi=4000);
   Check(elo+ehi=4000);
   CheckUTF8((clo>=900) and (clo<=1100),'Random32 distribution clo=%',[clo]);
-  CheckUTF8((dlo>=1900) and (dlo<=2100),'RandomDouble distribution dlo=%',[dlo]);
+  CheckUTF8((dlo>=1800) and (dlo<=2100),'RandomDouble distribution dlo=%',[dlo]);
   CheckUTF8((elo>=1900) and (elo<=2100),'RandomExt distribution elo=%',[elo]);
   s1 := TAESPRNG.Main.FillRandom(100);
   for i := 1 to length(s1) do
@@ -20399,7 +20461,6 @@ begin
   fId := aId;
   fIsError := false;
   fHttpClient := TDDDThreadsHttpClient.Create('127.0.0.1', HTTP_DEFAULTPORT);
-  fHttpClient.SetUser('Admin', 'synopse');
 end;
 
 destructor TDDDThreadsThread.Destroy;
@@ -20414,6 +20475,9 @@ var
   test: TDDDTest;
   success: boolean;
 begin
+  fHttpClient.SetUser('Admin', 'synopse');
+  for i := 1 to 150 {15000} do
+    fHttpClient.ServerTimestampSynchronize; // calls root/timestamp
   test := TDDDTest.Create;
   try
     success := true;
@@ -20455,6 +20519,10 @@ end;
 
 
 initialization
+  {$ifndef LVCL}
+  {$ifdef ISDELPHIXE}FormatSettings.{$endif}{$ifdef FPC}FormatSettings.{$endif}
+    DecimalSeparator := '.';
+  {$endif LVCL}
   _uE0 := WinAnsiToUtf8(@UTF8_E0_F4_BYTES[0],1);
   _uE7 := WinAnsiToUtf8(@UTF8_E0_F4_BYTES[1],1);
   _uE8 := WinAnsiToUtf8(@UTF8_E0_F4_BYTES[2],1);
