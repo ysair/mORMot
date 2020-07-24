@@ -453,7 +453,7 @@ begin
     if Cent<=100 then // avoid TDateTime values < 0 (generates wrong DecodeTime)
       result := 0 else
       result := EncodeDate((Cent-100)*100+Year-100,Month,Day);
-    if (Hour<>0) or (Min<>0) or (Sec<>0) then
+    if (Hour>1) or (Min>1) or (Sec>1) then
       result := result+EncodeTime(Hour-1,Min-1,Sec-1,0);
   end;
 end;
@@ -465,7 +465,7 @@ begin
     // Cent=Year=Month=Day=Hour=Main=Sec=0 -> stored as ""
     aIso8601 := '' else begin
     DateToIso8601PChar(tmp,true,(Cent-100)*100+Year-100,Month,Day);
-    if (Hour<>0) or (Min<>0) or (Sec<>0) then begin
+    if (Hour>1) or (Min>1) or (Sec>1) then begin
       TimeToIso8601PChar(@tmp[10],true,Hour-1,Min-1,Sec-1,0,'T');
       SetString(aIso8601,tmp,19); // we use 'T' as TTextWriter.AddDateTime
     end else
@@ -484,7 +484,7 @@ begin
     if Y>9999 then // avoid integer overflow -> stored as ""
       result := 2 else begin
       DateToIso8601PChar(Dest+1,true,Y,Month,Day);
-      if (Hour<>0) or (Min<>0) or (Sec<>0) then begin
+      if (Hour>1) or (Min>1) or (Sec>1) then begin
         TimeToIso8601PChar(Dest+11,true,Hour-1,Min-1,Sec-1,0,'T');
         result := 21; // we use 'T' as TTextWriter.AddDateTime
       end else
@@ -497,9 +497,9 @@ end;
 procedure TOracleDate.From(const aValue: TDateTime);
 var T: TSynSystemTime;
 begin
-  PInteger(PtrUInt(@self)+3)^ := 0; // set Day=Hour=Min=Sec to 0
   if aValue<=0 then begin
     PInteger(@self)^ := 0;
+    PInteger(PtrUInt(@self)+3)^ := 0; // set Day=Hour=Min=Sec to 0
     exit; // supplied TDateTime value = 0 -> store as null date
   end;
   T.FromDateTime(aValue);
@@ -511,7 +511,11 @@ begin
     Hour := T.Hour+1;
     Min := T.Minute+1;
     Sec := T.Second+1;
-  end ;
+  end else begin
+    Hour := 1;
+    Min := 1;
+    Sec := 1;
+  end;
 end;
 
 procedure TOracleDate.From(const aIso8601: RawUTF8);
@@ -525,10 +529,10 @@ var Value: QWord;
     Y: cardinal;
     NoTime: boolean;
 begin
-  PInteger(PtrUInt(@self)+3)^ := 0; // set Day=Hour=Min=Sec to 0
   Value := Iso8601ToTimeLogPUTF8Char(aIso8601,Length,@NoTime);
   if Value=0 then begin
     PInteger(@self)^ := 0;
+    PInteger(PtrUInt(@self)+3)^ := 0;  // set Day=Hour=Min=Sec to 0
     exit; // invalid ISO-8601 text -> store as null date
   end;
   Y := Value shr (6+6+5+5+4);
@@ -536,8 +540,12 @@ begin
   Year := (Y mod 100)+100;
   Month := ((Value32 shr (6+6+5+5)) and 15)+1;
   Day := ((Value32 shr (6+6+5)) and 31)+1;
-  if NoTime then
+  if NoTime then begin
+    Hour := 1;
+    Min := 1;
+    Sec := 1;
     exit;
+  end;
   Hour := ((Value32 shr (6+6)) and 31)+1;
   Min := ((Value32 shr 6) and 63)+1;
   Sec := (Value32 and 63)+1;
@@ -1487,14 +1495,14 @@ begin
     repeat
       Read := BlobLen;
       Status := LobRead(svchp,errhp,locp,Read,1,pointer(tmp),length(tmp),nil,nil,csid,csfrm);
-      stream.WriteBuffer(tmp,Read);
+      stream.WriteBuffer(pointer(tmp)^,Read);
       inc(result,Read);
     until Status<>OCI_NEED_DATA;
     Check(nil,Stmt,Status,errhp);
   end else begin
     SetLength(tmp,BlobLen);
     Check(nil,Stmt,LobRead(svchp,errhp,locp,result,1,pointer(tmp),result,nil,nil,csid,csfrm),errhp);
-    stream.WriteBuffer(tmp,result);
+    stream.WriteBuffer(pointer(tmp)^,result);
   end;
 end;
 
@@ -2549,8 +2557,10 @@ begin
   try
     fTimeElapsed.Resume;
     FreeHandles(false);
+    {$ifndef SYNDB_SILENCE}
     SynDBLog.Add.Log(sllDB,'Destroy: stats = % row(s) in %',
       [TotalRowsRetrieved,fTimeElapsed.Stop],self);
+    {$endif}
   finally
     inherited;
   end;
@@ -3392,11 +3402,9 @@ end;
 
 procedure TSQLDBOracleStatement.Prepare(const aSQL: RawUTF8;
   ExpectResults: Boolean);
-var oSQL: RawUTF8;
-    env: POCIEnv;
-    cached: boolean;
+var env: POCIEnv;
+    L: PtrInt;
 begin
-  cached := false;
   SQLLogBegin(sllDB);
   try
     try
@@ -3404,21 +3412,28 @@ begin
         raise ESQLDBOracle.CreateUTF8('%.Prepare should be called only once',[self]);
       // 1. process SQL
       inherited Prepare(aSQL,ExpectResults); // set fSQL + Connect if necessary
-      fPreparedParamsCount := ReplaceParamsByNames(aSQL,oSQL);
+      fPreparedParamsCount := ReplaceParamsByNumbers(aSQL,fSQLPrepared,':', true);
+      L := Length(fSQLPrepared);
+      while (L>0) and (fSQLPrepared[L] in [#1..' ',';']) do
+      if (fSQLPrepared[L]=';') and (L>5) and IdemPChar(@fSQLPrepared[L-3],'END') then
+        break else // allows 'END;' at the end of a statement
+        dec(L);    // trim ' ' or ';' right (last ';' could be found incorrect)
+      if L <> Length(fSQLPrepared) then
+        fSQLPrepared := copy(fSQLPrepared,1,L); // trim right ';' if any
       // 2. prepare statement
       env := (Connection as TSQLDBOracleConnection).fEnv;
       with OCI do begin
         HandleAlloc(env,fError,OCI_HTYPE_ERROR);
         if fUseServerSideStatementCache then begin
           if StmtPrepare2(TSQLDBOracleConnection(Connection).fContext,fStatement,
-             fError,pointer(oSQL),length(oSQL),nil,0,OCI_NTV_SYNTAX,
+             fError,pointer(fSQLPrepared),length(fSQLPrepared),nil,0,OCI_NTV_SYNTAX,
              OCI_PREP2_CACHE_SEARCHONLY) = OCI_SUCCESS then
-            cached := true else
+            fCacheIndex := 1 else
           Check(nil,self,StmtPrepare2(TSQLDBOracleConnection(Connection).fContext,fStatement,
-            fError,pointer(oSQL),length(oSQL),nil,0,OCI_NTV_SYNTAX,OCI_DEFAULT),fError);
+            fError,pointer(fSQLPrepared),length(fSQLPrepared),nil,0,OCI_NTV_SYNTAX,OCI_DEFAULT),fError);
         end else begin
           HandleAlloc(env,fStatement,OCI_HTYPE_STMT);
-          Check(nil,self,StmtPrepare(fStatement,fError,pointer(oSQL),length(oSQL),
+          Check(nil,self,StmtPrepare(fStatement,fError,pointer(fSQLPrepared),length(fSQLPrepared),
             OCI_NTV_SYNTAX,OCI_DEFAULT),fError);
         end;
       end;
@@ -3431,7 +3446,7 @@ begin
       end;
     end;
   finally
-    fTimeElapsed.FromExternalMicroSeconds(SQLLogEnd(' cache=%',[cached]));
+    fTimeElapsed.FromExternalMicroSeconds(SQLLogEnd(' cache=%',[fCacheIndex]));
   end;
 end;
 

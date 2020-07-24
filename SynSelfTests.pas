@@ -246,7 +246,6 @@ type
   TTestLowLevelCommon = class(TSynTestCase)
   protected
     {$ifndef DELPHI5OROLDER}
-    da: IObjectDynArray; // force the interface to be defined BEFORE the array
     a: array of TSQLRecordPeople;
     {$endif}
     fAdd,fDel: RawUTF8;
@@ -7001,6 +7000,7 @@ procedure TTestLowLevelCommon._TObjectDynArrayWrapper;
 const MAX = 10000;
 var i,j: integer;
     s: RawUTF8;
+    da: IObjectDynArray; // force the interface to be defined BEFORE the array
 procedure CheckItem(p: TSQLRecordPeople; i: integer);
 var s: RawUTF8;
 begin
@@ -7818,7 +7818,25 @@ type
     abArr: array of TSubAB;
     cdArr: array of TSubCD;
   end;
-{$ifdef ISDELPHI2010}
+  TNestedDtoObject = class(TSynAutoCreateFields)
+  private
+    FFieldString: RawUTF8;
+    FFieldInteger: integer;
+    FFieldVariant: variant;
+  published
+    property FieldString: RawUTF8 read FFieldString write FFieldString;
+    property FieldInteger: integer read FFieldInteger write FFieldInteger;
+    property FieldVariant: variant read FFieldVariant write FFieldVariant;
+  end;
+  TDtoObject = class(TSynAutoCreateFields)
+  private
+    FFieldNestedObject: TNestedDtoObject;
+    FSomeField: RawUTF8;
+  published
+    property NestedObject: TNestedDtoObject read FFieldNestedObject;
+    property SomeField: RawUTF8 read FSomeField write FSomeField;
+  end;
+  {$ifdef ISDELPHI2010}
   TStaticArrayOfInt = packed array[1..5] of Integer;
   TNewRTTI = record
     Number: integer;
@@ -7873,6 +7891,7 @@ var J,U,U2: RawUTF8;
     JAS: TTestCustomJSONArraySimple;
 {$ifndef NOVARIANTS}
     JAV: TTestCustomJSONArrayVariant;
+    GDtoObject: TDtoObject;
 {$endif}
     Trans: TTestCustomJSON2;
     Disco: TTestCustomDiscogs;
@@ -8340,7 +8359,20 @@ var J,U,U2: RawUTF8;
       end;
     end;
     Check(JAV.D='4');
-  {$endif}
+    GDtoObject := TDtoObject.Create;
+    U := '{"SomeField":"Test"}';
+    Check(ObjectLoadJSON(GDtoObject, U, nil, []),'nestedvariant1');
+     J := ObjectToJSON(GDtoObject, []);
+    CheckEqual(J,'{"NestedObject":{"FieldString":"","FieldInteger":0,'+
+      '"FieldVariant":null},"SomeField":"Test"}');
+    J := ObjectToJSON(GDtoObject, [woDontStore0]);
+    CheckEqual(J,U);
+    U := '{"NestedObject":{"FieldVariant":{"a":1,"b":2}},"SomeField":"Test"}';
+    Check(ObjectLoadJSON(GDtoObject, U, nil, [j2oHandleCustomVariants]),'nestedvariant2');
+    J := ObjectToJSON(GDtoObject, [woDontStore0,woDontStoreEmptyString]);
+    CheckEqual(J,U);
+    GDtoObject.Free;
+  {$endif NOVARIANTS}
 
     Finalize(Cache);
     FillCharFast(Cache,sizeof(Cache),0);
@@ -10202,7 +10234,7 @@ begin
   end;
   for i := 0 to V._count-1 do
     Check(V._(i)=Doc.Values[i]);
-  V.Add(4);
+  {$ifdef FPC}TDocVariantData(V).AddItem{$else}V.Add{$endif}(4);
   Check(V._count=4);
   for i := 0 to 2 do
     Check(V._(i)=Doc.Values[i]);
@@ -10235,7 +10267,7 @@ begin
   _UniqueFast(V1);      // change options of V1 to be by-reference
   V2 := V1;
   Check(V1._(1){$ifdef FPC}._JSON{$endif}='{"name":"John","year":1972}');
-  V1._(1).name := 'Jim';
+  {$ifdef FPC}TDocVariantData(V1).Values[1]{$else}V1._(1){$endif}.name := 'Jim';
   Check(V1{$ifdef FPC}._JSON{$endif}='["root",{"name":"Jim","year":1972}]');
   Check(V2{$ifdef FPC}._JSON{$endif}='["root",{"name":"Jim","year":1972}]');
   _UniqueFast(V2); // now V1 modifications should not affect V2
@@ -10271,9 +10303,9 @@ begin
   Check(TDocVariantData(V1)._[1].I['year']=1972);
   {$ifdef FPC}_Safe(V1)^.AddItem{$else}V1.Add{$endif}(3.1415);
   Check(V1{$ifdef FPC}._JSON{$endif}='["root",{"name":"Jim","year":1972},3.1415]');
-  V1._(1).Delete('year');
+  {$ifdef FPC}TDocVariantData(V1)._[1]{$else}V1._(1){$endif}.Delete('year');
   Check(V1{$ifdef FPC}._JSON{$endif}='["root",{"name":"Jim"},3.1415]');
-  V1.Delete(1); //<--- here we get an error with FPC on win64 if optimization = -O1 !??? All ok with -O2
+  {$ifdef FPC}TDocVariantData(V1){$else}V1{$endif}.Delete(1);
   Check(V1{$ifdef FPC}._JSON{$endif}='["root",3.1415]');
   TDocVariantData(V2).DeleteByProp('name','JIM',true);
   Check(V2{$ifdef FPC}._JSON{$endif}='["root",{"name":"Jim","year":1972}]');
@@ -14020,6 +14052,7 @@ begin
     DeleteFile(TempFileName); // use a temporary file
     {$ifndef NOSQLITE3ENCRYPT}
     if ClassType<>TTestFileBasedMemoryMap then
+      // memory map is not compatible with our encryption
       password := 'password1';
     {$endif}
   end;
@@ -14116,7 +14149,7 @@ begin
     check(not IsOldSQLEncryptTable(TempFileName));
     Demo := TSQLDataBase.Create(TempFileName,'NewPass'); // reuse the temporary file
     Demo.Synchronous := smOff;
-    Demo.LockingMode := lmExclusive;
+    Demo.LockingMode := lmExclusive; 
     Demo.UseCache := true; // use the cache for the JSON requests
     Demo.WALMode := InheritsFrom(TTestFileBasedWAL); // test Write-Ahead Logging
     Check(Demo.WALMode=InheritsFrom(TTestFileBasedWAL));

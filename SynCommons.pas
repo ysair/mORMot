@@ -1626,6 +1626,8 @@ function StringToWinAnsi(const Text: string): WinAnsiString;
 // according to each Args[] supplied items - so you will never get any exception
 // as with the SysUtils.Format() when a specifier is incorrect
 // - resulting string has no length limit and uses fast concatenation
+// - there is no escape char, so to output a '%' character, you need to use '%'
+// as place-holder, and specify '%' as value in the Args array
 // - note that, due to a Delphi compiler limitation, cardinal values should be
 // type-casted to Int64() (otherwise the integer mapped value will be converted)
 // - any supplied TObject instance will be written as their class name
@@ -6227,6 +6229,9 @@ type
   // - warning: the IObjectDynArray MUST be defined in the stack, class or
   // record BEFORE the dynamic array it is wrapping, otherwise you may leak
   // memory, and TObjectDynArrayWrapper.Destroy will raise an ESynException
+  // - warning: issues with Delphi 10.4 Sydney were reported, which seemed to
+  // change the order of fields finalization, so the whole purpose of this
+  // wrapper may have become incompatible with Delphi 10.4 and up
   // - a sample usage may be:
   // !var DA: IObjectDynArray; // defined BEFORE the dynamic array itself
   // !    A: array of TMyObject;
@@ -17206,10 +17211,13 @@ end;
 
 function TSynAnsiConvert.AnsiBufferToRawUTF8(Source: PAnsiChar; SourceChars: Cardinal): RawUTF8;
 var tmp: TSynTempBuffer;
+    endchar: pointer; // try circumvent Delphi 10.4 optimization issue
 begin
   if (Source=nil) or (SourceChars=0) then
-    result := '' else
-    tmp.Done(AnsiBufferToUTF8(tmp.Init(SourceChars*3),Source,SourceChars),result);
+    result := '' else begin
+    endchar := AnsiBufferToUTF8(tmp.Init(SourceChars*3),Source,SourceChars,true);
+    tmp.Done(endchar,result);
+  end;
 end;
 
 constructor TSynAnsiConvert.Create(aCodePage: cardinal);
@@ -17517,7 +17525,11 @@ By1:  c := byte(Source^); inc(Source);
   end;
   if not NoTrailingZero then
     Dest^ := #0;
+  {$ifdef ISDELPHI104}
+  exit(Dest); // circumvent Delphi 10.4 optimizer bug
+  {$else}
   Result := Dest;
+  {$endif}
 end;
 
 procedure TSynAnsiFixedWidth.InternalAppendUTF8(Source: PAnsiChar; SourceChars: Cardinal;
@@ -19021,7 +19033,7 @@ asm .noframe // rcx=P, rdx=val (Linux: rdi,rsi) - val is QWord on CPUX64
         mov     [rcx - 1], dl
         lea     rax, [rcx + r10 - 1]       // includes '-' if val<0
 end;
-{$else}
+{$else} {$ifdef FPC} nostackframe; assembler; {$endif}
 asm // eax=P, edx=val
         mov     ecx, edx
         sar     ecx, 31         // 0 if val>=0 or -1 if val<0
@@ -19140,7 +19152,7 @@ asm .noframe // rcx=P, rdx=val (Linux: rdi,rsi) - val is QWord on CPUX64
         or      dl, '0'
         mov     [rax], dl
 end;
-{$else}
+{$else} {$ifdef FPC} nostackframe; assembler; {$endif}
 asm     // eax=P, edx=val
         cmp     edx, 10
         jb      @3  // direct process of common val=0 (or val<10)
@@ -20217,7 +20229,7 @@ begin
     P2[i] := u;
   end;
 end;
-{$else}
+{$else} {$ifdef FPC} nostackframe; assembler; {$endif}
 asm // eax=P1, edx=P2, ecx=count
         push    ebx
         push    esi
@@ -20340,15 +20352,15 @@ end;
     whereas FPC RTL's popcnt() is much slower }
 
 {$ifdef CPUX86}
-function GetBitsCountSSE42(value: PtrInt): PtrInt;
+function GetBitsCountSSE42(value: PtrInt): PtrInt; {$ifdef FPC} nostackframe; assembler; {$endif}
 asm
-        {$ifdef FPC}
+        {$ifdef FPC_X86ASM}
         popcnt  eax, eax
         {$else} // oldest Delphi don't support this opcode
         db      $f3,$0f,$B8,$c0
         {$endif}
 end;
-function GetBitsCountPas(value: PtrInt): PtrInt;
+function GetBitsCountPas(value: PtrInt): PtrInt; {$ifdef FPC} nostackframe; assembler; {$endif}
 asm // branchless Wilkes-Wheeler-Gill i386 asm implementation
         mov     edx, eax
         shr     eax, 1
@@ -20699,7 +20711,8 @@ function FastNewString(len: PtrInt; cp: cardinal): PAnsiChar; inline;
 begin
   if len>0 then begin
     {$ifdef FPC_X64MM}result := _Getmem({$else}GetMem(result,{$endif}len+(STRRECSIZE+4));
-    PCardinal(@PStrRec(result)^.codePage)^ := cp or (1 shl 16); // also set elemSize:=1
+    PStrRec(result)^.codePage := cp;
+    PStrRec(result)^.elemSize := 1;
     PStrRec(result)^.refCnt := 1;
     PStrRec(result)^.length := len;
     PCardinal(result+len+STRRECSIZE)^ := 0; // ensure ends with four #0
@@ -20800,8 +20813,8 @@ end;
 
 { note: fpc_ansistr_compare/_equal do check the codepage and make a UTF-8
   conversion if necessary, whereas Delphi _LStrCmp/_LStrEqual don't;
-  involving codepage is safer, but paranoid, and 1. is (much) slower,
-  and 2. is not Delphi compatible -> we rather follow the Delphi's way }
+  involving codepage is safer, but paranoid, and 1. is (much) slower, and
+  2. is not Delphi compatible -> we rather follow the Delphi/Lazy's way }
 
 function _ansistr_compare(s1, s2: pointer): SizeInt; nostackframe; assembler;
 asm
@@ -20932,8 +20945,11 @@ procedure _ansistr_setlength_new(var s: RawByteString; len: PtrInt; cp: cardinal
 var p, new: PAnsiChar;
     l: PtrInt;
 begin
-  if cp<=CP_OEMCP then // TranslatePlaceholderCP logic
+  if cp<=CP_OEMCP then begin // TranslatePlaceholderCP logic
     cp := DefaultSystemCodePage;
+    if cp=0 then
+      cp := CP_NONE;
+  end;
   new := FastNewString(len,cp);
   p := pointer(s);
   if p<>nil then begin
@@ -21083,7 +21099,7 @@ end;
 
 procedure _ansistr_concat_multi_utf8(var dest: RawByteString;
   const s: array of RawByteString; cp: cardinal);
-var first,len,i,l: TStrLen;
+var first,len,i,l: integer; // should NOT be PtrInt/SizeInt to avoid FPC bug with high(s) :(
     cpf,cpi: cardinal;
     p: pointer;
     new: PAnsiChar;
@@ -22429,7 +22445,7 @@ begin
   end;
 end;
 {$else}
-function IntToString(Value: integer): string;
+function IntToString(Value: integer): string; {$ifdef FPC} nostackframe; assembler; {$endif}
 asm
   jmp Int32ToUTF8
 end;
@@ -22525,13 +22541,13 @@ asm .noframe // rcx=a (Linux: rdi)
 end;
 {$else}
 {$ifdef CPUX86}
-function bswap32(a: cardinal): cardinal;
+function bswap32(a: cardinal): cardinal; {$ifdef FPC} nostackframe; assembler; {$endif}
 asm
   bswap eax
 end;
 
 function bswap64({$ifdef FPC_X86}constref{$else}const{$endif} a: QWord): QWord;
-asm
+{$ifdef FPC} nostackframe; assembler; {$endif} asm
   {$ifdef FPC_X86}
   mov edx, dword ptr[eax]
   mov eax, dword ptr[eax + 4]
@@ -23909,7 +23925,7 @@ end;
 {$ifdef DOUBLETOSHORT_USEGRISU}
 
 // includes Fabian Loitsch's Grisu algorithm especially compiled for double
-{$I .\SynDoubleToText.inc} // implements DoubleToAscii()
+{$I SynDoubleToText.inc} // implements DoubleToAscii()
 
 function DoubleToShort(var S: ShortString; const Value: double): integer;
 var valueabs: double;
@@ -25945,7 +25961,7 @@ asm // eax=Y, edx=P
 end;
 
 function Iso8601ToTimeLog(const S: RawByteString): TTimeLog;
-asm
+{$ifdef FPC} nostackframe; assembler; {$endif} asm
     xor ecx,ecx  // ContainsNoTime=nil
     test eax,eax   // if s='' -> p=nil -> will return 0, whatever L value is
     jz Iso8601ToTimeLogPUTF8Char
@@ -25954,6 +25970,7 @@ asm
 end;
 
 function UpperCopy(dest: PAnsiChar; const source: RawUTF8): PAnsiChar;
+{$ifdef FPC} nostackframe; assembler; {$endif}
 asm // eax=dest source=edx
         test    edx, edx
         jz      @z
@@ -25973,6 +25990,7 @@ asm // eax=dest source=edx
 end;
 
 function UpperCopyShort(dest: PAnsiChar; const source: shortstring): PAnsiChar;
+{$ifdef FPC} nostackframe; assembler; {$endif}
 asm // eax=dest source=edx
         push    esi
         push    ebx
@@ -25995,6 +26013,7 @@ asm // eax=dest source=edx
 end;
 
 function IdemPCharAndGetNextLine(var source: PUTF8Char; searchUp: PAnsiChar): boolean;
+{$ifdef FPC} nostackframe; assembler; {$endif}
 asm // eax=source edx=searchUp
         push    eax        // save source var
         mov     eax, [eax] // eax=source
@@ -26027,6 +26046,7 @@ asm // eax=source edx=searchUp
 end;
 
 procedure crcblockNoSSE42(crc128, data128: PBlock128);
+{$ifdef FPC} nostackframe; assembler; {$endif}
 asm // Delphi is not efficient about compiling above pascal code
         push    ebp
         push    edi
@@ -26087,6 +26107,7 @@ asm // Delphi is not efficient about compiling above pascal code
 end;
 
 function crc32cfast(crc: cardinal; buf: PAnsiChar; len: cardinal): cardinal;
+{$ifdef FPC} nostackframe; assembler; {$endif}
 asm  // adapted from Aleksandr Sharahov code and Maxim Masiutin remarks
         test    edx, edx
         jz      @z
@@ -26163,6 +26184,7 @@ const
   CMP_RANGES = $44; // see https://msdn.microsoft.com/en-us/library/bb531425
 
 function UpperCopy255BufSSE42(dest: PAnsiChar; source: PUTF8Char; sourceLen: PtrInt): PAnsiChar;
+{$ifdef FPC} nostackframe; assembler; {$endif}
 asm // eax=dest edx=source ecx=sourceLen
        test    ecx,ecx
        jz      @z
@@ -26210,6 +26232,7 @@ end;
 {$endif DELPHI5OROLDER}
 
 function fnv32(crc: cardinal; buf: PAnsiChar; len: PtrInt): cardinal;
+{$ifdef FPC} nostackframe; assembler; {$endif}
 asm // eax=crc, edx=buf, ecx=len
         push    ebx
         test    edx, edx
@@ -26226,6 +26249,7 @@ asm // eax=crc, edx=buf, ecx=len
 end; // we tried an unrolled version, but it was slower on our Core i7!
 
 function kr32(crc: cardinal; buf: PAnsiChar; len: PtrInt): cardinal;
+{$ifdef FPC} nostackframe; assembler; {$endif}
 asm // eax=crc, edx=buf, ecx=len
         test    ecx, ecx
         push    edi
@@ -26279,6 +26303,7 @@ asm // eax=crc, edx=buf, ecx=len
 end;
 
 function ToVarInt32(Value: PtrInt; Dest: PByte): PByte;
+{$ifdef FPC} nostackframe; assembler; {$endif}
 asm
         test    eax, eax
         jnl     @pos
@@ -26293,6 +26318,7 @@ asm
 end;
 
 function ToVarUInt32(Value: PtrUInt; Dest: PByte): PByte;
+{$ifdef FPC} nostackframe; assembler; {$endif}
 asm
         cmp     eax, $7f
         jbe     @0
@@ -26340,7 +26366,7 @@ begin
 end;
 
 function SortDynArrayInteger(const A,B): integer;
-asm
+{$ifdef FPC} nostackframe; assembler; {$endif} asm
         mov     ecx, [eax]
         mov     edx, [edx]
         xor     eax, eax
@@ -26351,7 +26377,7 @@ asm
         sub     eax, ecx
 end;
 function SortDynArrayCardinal(const A,B): integer;
-asm
+{$ifdef FPC} nostackframe; assembler; {$endif} asm
         mov     ecx, [eax]
         mov     edx, [edx]
         xor     eax, eax
@@ -26360,7 +26386,7 @@ asm
         sbb     eax,0
 end;
 function SortDynArrayPointer(const A,B): integer;
-asm
+{$ifdef FPC} nostackframe; assembler; {$endif} asm
         mov     ecx, [eax]
         mov     edx, [edx]
         xor     eax, eax
@@ -26369,6 +26395,7 @@ asm
         sbb     eax,0
 end;
 function SortDynArrayInt64(const A,B): integer;
+{$ifdef FPC} nostackframe; assembler; {$endif}
 asm // Delphi x86 compiler is not efficient at compiling Int64 comparisons
         mov     ecx, [eax]
         mov     eax, [eax + 4]
@@ -26385,7 +26412,7 @@ asm // Delphi x86 compiler is not efficient at compiling Int64 comparisons
 @p:     mov     eax, 1
 end;
 function SortDynArrayQWord(const A,B): integer;
-asm // Delphi x86 compiler is not efficient, and oldest even incorrect
+{$ifdef FPC} nostackframe; assembler; {$endif} asm
         mov     ecx, [eax]
         mov     eax, [eax + 4]
         cmp     eax, [edx + 4]
@@ -26400,10 +26427,11 @@ asm // Delphi x86 compiler is not efficient, and oldest even incorrect
 @p:     mov     eax, 1
 end;
 function SortDynArrayRawByteString(const A,B): integer;
-asm
+{$ifdef FPC} nostackframe; assembler; {$endif} asm
         jmp     SortDynArrayAnsiString
 end;
 function SortDynArrayAnsiString(const A,B): integer;
+{$ifdef FPC} nostackframe; assembler; {$endif}
 asm // x86 version optimized for AnsiString/RawUTF8/RawByteString types
         mov     eax, [eax]
         mov     edx, [edx]
@@ -26460,19 +26488,21 @@ asm // x86 version optimized for AnsiString/RawUTF8/RawByteString types
 @1:     mov     eax, 1
 end;
 function SortDynArrayAnsiStringI(const A,B): integer;
+{$ifdef FPC} nostackframe; assembler; {$endif}
 asm // avoid a call on the stack on x86 platform
         mov     eax, [eax]
         mov     edx, [edx]
         jmp     StrIComp
 end;
 function SortDynArrayPUTF8Char(const A,B): integer;
+{$ifdef FPC} nostackframe; assembler; {$endif}
 asm // avoid a call on the stack on x86 platform
         mov     eax, [eax]
         mov     edx, [edx]
         jmp     dword ptr[StrComp]
 end;
 function SortDynArrayDouble(const A,B): integer;
-asm
+{$ifdef FPC} nostackframe; assembler; {$endif} asm
         fld     qword ptr[eax]
         fcomp   qword ptr[edx]
         fstsw   ax
@@ -26486,7 +26516,7 @@ asm
 @p:     mov     eax, 1
 end;
 function SortDynArraySingle(const A,B): integer;
-asm
+{$ifdef FPC} nostackframe; assembler; {$endif} asm
         fld     dword ptr[eax]
         fcomp   dword ptr[edx]
         fstsw   ax
@@ -26896,7 +26926,7 @@ asm .noframe // rcx=s, rdx=accept (Linux: rdi,rsi)
 end;
 {$endif CPUX64}
 {$ifdef CPUX86}
-function strcspnsse42(s,reject: pointer): integer;
+function strcspnsse42(s,reject: pointer): integer; {$ifdef FPC} nostackframe; assembler; {$endif}
 asm // eax=s, edx=reject
         push    edi
         push    esi
@@ -26949,7 +26979,7 @@ asm // eax=s, edx=reject
         add     ecx, 16
         jmp     @1
 end;
-function strspnsse42(s,accept: pointer): integer;
+function strspnsse42(s,accept: pointer): integer; {$ifdef FPC} nostackframe; assembler; {$endif}
 asm // eax=s, edx=accept
         push    edi
         push    esi
@@ -27003,7 +27033,7 @@ asm // eax=s, edx=accept
         jmp     @1
 end;
 {$ifndef DELPHI5OROLDER}
-function StrLenSSE2(S: pointer): PtrInt;
+function StrLenSSE2(S: pointer): PtrInt; {$ifdef FPC} nostackframe; assembler; {$endif}
 asm // from GPL strlen32.asm by Agner Fog - www.agner.org/optimize
         mov     ecx, eax            // copy pointer
         test    eax, eax
@@ -27766,7 +27796,7 @@ begin
     result := -1;     // Str1=''
 end;
 {$else}
-function AnsiIComp(Str1, Str2: pointer): PtrInt;
+function AnsiIComp(Str1, Str2: pointer): PtrInt; {$ifdef FPC} nostackframe; assembler; {$endif}
 asm // fast 8 bits WinAnsi comparison using the NormToUpper[] array
         cmp     eax, edx
         je      @2
@@ -28517,6 +28547,7 @@ begin
 end;
 {$else PUREPASCAL}
 function Base64EncodeMain(rp, sp: PAnsiChar; len: cardinal): integer;
+{$ifdef FPC} nostackframe; assembler; {$endif}
 asm // eax=rp edx=sp ecx=len - pipeline optimized version by AB
         push    ebx
         push    esi
@@ -28850,6 +28881,7 @@ begin
 end;
 {$else PUREPASCAL}
 function Base64uriEncodeMain(rp, sp: PAnsiChar; len: cardinal): integer;
+{$ifdef FPC} nostackframe; assembler; {$endif}
 asm // eax=rp edx=sp ecx=len - pipeline optimized version by AB
         push    ebx
         push    esi
@@ -29835,7 +29867,7 @@ begin
   until source^=#0;
   source := nil;
 end;
-{$else}
+{$else} {$ifdef FPC} nostackframe; assembler; {$endif}
 asm // eax=source edx=search
         push    eax       // save source var
         mov     eax, [eax]  // eax=source
@@ -29900,7 +29932,7 @@ begin
   result := true;
 end;
 {$else}
-function IdemPCharW(p: PWideChar; up: PUTF8Char): boolean;
+function IdemPCharW(p: PWideChar; up: PUTF8Char): boolean; {$ifdef FPC} nostackframe; assembler; {$endif}
 asm // eax=p edx=up
         test    eax, eax
         jz      @e // P=nil -> false
@@ -30059,7 +30091,7 @@ begin
   until source^=#0;
   source := nil;
 end;
-{$else}
+{$else} {$ifdef FPC} nostackframe; assembler; {$endif}
 asm // eax=source edx=search
         push    eax        // save source var
         mov     eax, [eax] // eax=source
@@ -35573,7 +35605,7 @@ begin
   end else
     result := 0;
 end;
-{$else}
+{$else} {$ifdef FPC} nostackframe; assembler; {$endif}
 asm  // eax=Data edx=Len
         push    esi
         push    edi
@@ -36249,7 +36281,7 @@ asm .noframe {$endif FPC}
           mov     dword ptr [rdx + 12], r11d
 @z:
 end;
-{$else}
+{$else} {$ifdef FPC} nostackframe; assembler; {$endif}
 asm // eax=crc128 edx=data128 ecx=count
           push    ebx
           push    esi
@@ -36264,7 +36296,7 @@ asm // eax=crc128 edx=data128 ecx=count
           mov     ebx, dword ptr[esi + 4]
           mov     ecx, dword ptr[esi + 8]
           mov     edx, dword ptr[esi + 12]
-{$ifdef FPC} align 8
+{$ifdef FPC_X86ASM} align 8
 @s:       crc32   eax, dword ptr[edi]
           crc32   ebx, dword ptr[edi + 4]
           crc32   ecx, dword ptr[edi + 8]
@@ -36331,7 +36363,7 @@ asm .noframe {$endif FPC}
 end;
 {$else} {$ifdef FPC}nostackframe; assembler;{$endif}
 asm // eax=crc, edx=value
-        {$ifdef FPC_OR_UNICODE}
+        {$ifdef FPC_X86ASM}
         crc32   eax, edx
         {$else}
         db      $F2, $0F, $38, $F1, $C2
@@ -36359,7 +36391,7 @@ end;
 {$else} {$ifdef FPC}nostackframe; assembler;{$endif}
 asm // eax=crc128, edx=data128
         mov     ecx, eax
-        {$ifdef FPC_OR_UNICODE}
+        {$ifdef FPC_X86ASM}
         mov     eax, dword ptr[ecx]
         crc32   eax, dword ptr[edx]
         mov     dword ptr[ecx], eax
@@ -36468,7 +36500,7 @@ asm // eax=crc, edx=buf, ecx=len
         jz      @0
         jmp     @align
         db      $8D, $0B4, $26, $00, $00, $00, $00 // manual @by8 align 16
-@a:     {$ifdef FPC}
+@a:     {$ifdef FPC_X86ASM}
         crc32   eax, byte ptr[edx]
         {$else}
         db      $F2, $0F, $38, $F0, $02
@@ -36484,7 +36516,7 @@ asm // eax=crc, edx=buf, ecx=len
 @rem:   pop     ecx
         test    cl, 4
         jz      @4
-        {$ifdef FPC}
+        {$ifdef FPC_X86ASM}
         crc32   eax, dword ptr[edx]
         {$else}
         db      $F2, $0F, $38, $F1, $02
@@ -36492,7 +36524,7 @@ asm // eax=crc, edx=buf, ecx=len
         add     edx, 4
 @4:     test    cl, 2
         jz      @2
-        {$ifdef FPC}
+        {$ifdef FPC_X86ASM}
         crc32   eax, word ptr[edx]
         {$else}
         db      $66, $F2, $0F, $38, $F1, $02
@@ -36500,14 +36532,14 @@ asm // eax=crc, edx=buf, ecx=len
         add     edx, 2
 @2:     test    cl, 1
         jz      @0
-        {$ifdef FPC}
+        {$ifdef FPC_X86ASM}
         crc32   eax, byte ptr[edx]
         {$else}
         db      $F2, $0F, $38, $F0, $02
         {$endif}
 @0:     not     eax
         ret
-@by8:   {$ifdef FPC}
+@by8:   {$ifdef FPC_X86ASM}
         crc32   eax, dword ptr[edx]
         crc32   eax, dword ptr[edx + 4]
         {$else}
@@ -36836,8 +36868,12 @@ asm .noframe // rcx/rdi=left, rdx/rsi=right r8/rdx=product
         mov     qword ptr [r8+8], rdx
 end;
 {$else}
-{$ifdef CPUX86}
+{$ifdef CPUX86} {$ifdef FPC} nostackframe; assembler; {$endif}
 asm // adapted from FPC compiler output, which is much better than Delphi's here
+        {$ifdef FPC}
+        push    ebp
+        mov     ebp, esp
+        {$endif FPC}
         mov     ecx, eax
         mov     eax, dword ptr [ebp+8H]
         mul     dword ptr [ebp+10H]
@@ -36863,6 +36899,9 @@ asm // adapted from FPC compiler output, which is much better than Delphi's here
         adc     edx, 0
         mov     dword ptr [ecx+8H], eax
         mov     dword ptr [ecx+0CH], edx
+        {$ifdef FPC}
+        pop     ebp
+        {$endif FPC}
 end;
 {$else} // CPU-neutral implementation
 var l: TQWordRec absolute left;
@@ -40616,7 +40655,8 @@ begin
   end;
   {$else MSWINDOWS}
   {$ifdef FPCUSEVERSIONINFO} // FPC 3.0+ if enabled in Synopse.inc / project options
-  if aFileName<>'' then begin
+  if aFileName<>'' then
+  try
     VI := TVersionInfo.Create;
     try
       if (aFileName<>ExeVersion.ProgramFileName) and (aFileName<>ParamStr(0)) then
@@ -40660,6 +40700,8 @@ begin
     finally
       VI.Free;
     end;
+  except
+    // just ignore if version information resource is missing
   end;
   {$endif FPCUSEVERSIONINFO}
   {$endif MSWINDOWS}
@@ -48604,23 +48646,24 @@ begin
   result := true;
   Data := @V; // Data=V is const so should not be modified - but we need it
   case length(Arguments) of
-  0:if SameText(Name,'Clear') then begin
-      Data^.VCount := 0;
-      Data^.VOptions := Data^.VOptions-[dvoIsObject,dvoIsArray];
-      exit;
-    end;
-  1:if SameText(Name,'Add') then begin
-      ndx := Data^.InternalAdd('');
-      SetVariantByValue(variant(Arguments[0]),Data^.VValue[ndx]);
-      if dvoInternValues in Data^.VOptions then
-        DocVariantType.InternValues.UniqueVariant(Data^.VValue[ndx]);
-      exit;
-    end else
-    if SameText(Name,'Delete') then begin
-      SetTempFromFirstArgument;
-      Data^.Delete(Data^.GetValueIndex(temp));
-      exit;
-    end else
+  {$ifndef FPC} // Data=@V trick raises GPF on FPC -> read/only
+   0: if SameText(Name,'Clear') then begin
+        Data^.VCount := 0;
+        Data^.VOptions := Data^.VOptions-[dvoIsObject,dvoIsArray];
+        exit;
+      end; {$endif FPC}
+   1: {$ifndef FPC} if SameText(Name,'Add') then begin
+        ndx := Data^.InternalAdd('');
+        SetVariantByValue(variant(Arguments[0]),Data^.VValue[ndx]);
+        if dvoInternValues in Data^.VOptions then
+          DocVariantType.InternValues.UniqueVariant(Data^.VValue[ndx]);
+        exit;
+      end else
+      if SameText(Name,'Delete') then begin
+        SetTempFromFirstArgument;
+        Data^.Delete(Data^.GetValueIndex(temp));
+        exit;
+      end else {$endif FPC}
     if SameText(Name,'Exists') then begin
       SetTempFromFirstArgument;
       variant(Dest) := Data^.GetValueIndex(temp)>=0;
@@ -48648,14 +48691,14 @@ begin
         dvoNameCaseSensitive in Data^.VOptions,variant(Dest),true);
       exit;
     end;
-  2:if SameText(Name,'Add') then begin
+  2:{$ifndef FPC} if SameText(Name,'Add') then begin
       SetTempFromFirstArgument;
       ndx := Data^.InternalAdd(temp);
       SetVariantByValue(variant(Arguments[1]),Data^.VValue[ndx]);
       if dvoInternValues in Data^.VOptions then
         DocVariantType.InternValues.UniqueVariant(Data^.VValue[ndx]);
       exit;
-    end;
+    end; {$endif FPC}
   end;
   result := false;
 end;
@@ -51477,7 +51520,7 @@ end;
 
 { TDynArrayHasher }
 
-function HashFile(const FileName: TFileName; Hasher: THasher=nil): cardinal;
+function HashFile(const FileName: TFileName; Hasher: THasher): cardinal;
 var buf: array[word] of cardinal; // 256KB of buffer
     read: integer;
     f: THandle;
@@ -62673,7 +62716,7 @@ begin
 end;
 
 {$ifdef CPUINTEL}
-function IsXmmYmmOSEnabled: boolean; assembler;
+function IsXmmYmmOSEnabled: boolean; assembler; {$ifdef FPC} nostackframe; assembler; {$endif}
 asm // see https://software.intel.com/en-us/blogs/2011/04/14/is-avx-enabled
         xor     ecx, ecx  // specify control register XCR0 = XFEATURE_ENABLED_MASK
         db  $0f, $01, $d0 // XGETBV reads XCR0 into EDX:EAX
@@ -62781,7 +62824,7 @@ begin
     RedirectCode(@fpc_dynarray_decr_ref,@fpc_dynarray_clear);
     {$ifdef FPC_HAS_CPSTRING}
     {$ifdef LINUX}
-    if DefaultSystemCodePage=CP_UTF8 then begin
+    if (DefaultSystemCodePage=CP_UTF8) or (DefaultSystemCodePage=0) then begin
       RedirectRtl(@_fpc_ansistr_concat,@_ansistr_concat_utf8);
       RedirectRtl(@_fpc_ansistr_concat_multi,@_ansistr_concat_multi_utf8);
     end;
@@ -63124,7 +63167,6 @@ initialization
   Assert(SizeOf(TFileTime)=SizeOf(Int64)); // see e.g. FileTimeToInt64
   {$endif CPU64}
   {$endif MSWINDOWS}
-
 
 finalization
   {$ifndef NOVARIANTS}
