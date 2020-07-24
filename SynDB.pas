@@ -1700,10 +1700,14 @@ type
     fForceBlobAsNull: boolean;
     fForceDateWithMS: boolean;
     fDBMS: TSQLDBDefinition;
+    {$ifndef SYNDB_SILENCE}
     fSQLLogLog: TSynLog;
     fSQLLogLevel: TSynLogInfo;
+    {$endif}
     fSQLWithInlinedParams: RawUTF8;
     fSQLLogTimer: TPrecisionTimer;
+    fCacheIndex: integer;
+    fSQLPrepared: RawUTF8;
     function GetSQLWithInlinedParams: RawUTF8;
     procedure ComputeSQLWithInlinedParams;
     function GetForceBlobAsNull: boolean;
@@ -2182,11 +2186,24 @@ type
     // - follows the format expected by TSQLDBProxyStatement
     procedure ColumnsToBinary(W: TFileBufferWriter;
       Null: pointer; const ColTypes: TSQLDBFieldTypeDynArray); virtual;
+    /// low-level access to the Timer used for last DB operation
+    property SQLLogTimer: TPrecisionTimer read fSQLLogTimer;
+    /// after a call to Prepare(), contains the query text to be passed to the DB
+    // - Depends on DB parameters placeholder are replaced to ?, :AA, $1 etc
+    // - this SQL is ready to be used in any DB tool, e.g. to check the real 
+    // execution plan/timing
+    property SQLPrepared: RawUTF8 read fSQLPrepared;
+    /// low-level access to the statement cache index, after a call to Prepare()
+    // - contains >= 0 if the database supports prepared statement cache 
+    //(Oracle, Postgres) and query plan is cached; contains -1 in other cases
+    property CacheIndex: integer read fCacheIndex;
   published
     /// the prepared SQL statement, as supplied to Prepare() method
     property SQL: RawUTF8 read fSQL;
     /// the prepared SQL statement, with all '?' changed into the supplied
     // parameter values
+    // - such statement query plan usually differ from a real execution plan
+    // for prepared statements with parameters - see SQLPrepared property instead
     property SQLWithInlinedParams: RawUTF8 read GetSQLWithInlinedParams;
     /// the current row after Execute/Step call, corresponding to Column*() methods
     // - contains 0 before initial Step call, or a number >=1 during data retrieval
@@ -2830,9 +2847,12 @@ function ReplaceParamsByNames(const aSQL: RawUTF8; var aNewSQL: RawUTF8): intege
 
 /// replace all '?' in the SQL statement with indexed parameters like $1 $2 ...
 // - returns the number of ? parameters found within aSQL
-// - as used e.g. by PostgreSQL library
+// - as used e.g. by PostgreSQL & Oracle (:1 :2) library
+// - if AllowSemicolon is false (by default), reject any statement with ;
+// (Postgres do not allow ; inside prepared statement); it should be 
+// true for Oracle
 function ReplaceParamsByNumbers(const aSQL: RawUTF8; var aNewSQL: RawUTF8;
-  IndexChar: AnsiChar = '$'): integer;
+  IndexChar: AnsiChar = '$'; AllowSemicolon: boolean = false): integer;
 
 /// create a JSON array from an array of UTF-8 bound values
 // - as generated during array binding, i.e. with quoted strings
@@ -4116,9 +4136,11 @@ var Stmt: TSQLDBStatement;
       end;
     except
       on E: Exception do begin
+        {$ifndef SYNDB_SILENCE}
         with SynDBLog.Add do
           if [sllSQL,sllDB,sllException,sllError]*Family.Level<>[] then
             LogLines(sllSQL,pointer(Stmt.SQLWithInlinedParams),self,'--');
+        {$endif}
         Stmt.Free;
         result := nil;
         StringToUTF8(E.Message,fErrorMessage);
@@ -6433,7 +6455,7 @@ begin
         result := fConnectionPool.List[i];
         exit;
       end;
-      result := NewConnection;
+      result := NewConnection; // no need to release the lock (fast method)
       (result as TSQLDBConnectionThreadSafe).fThreadID := GetCurrentThreadId;
       fLatestConnectionRetrievedInPool := fConnectionPool.Add(result)
     finally
@@ -6729,6 +6751,7 @@ begin
   inherited Create;
   fConnection := aConnection;
   fStripSemicolon := true;
+  fCacheIndex := -1;
   if aConnection<>nil then
     fDBMS := aConnection.fProperties.DBMS;
 end;
@@ -6965,11 +6988,17 @@ begin
     if Expanded then
       W.Add('[');
     // write rows data
+    {$ifdef SYNDB_SILENCE}
+    fSQLLogTimer.Resume; // log fetch duration
+    {$endif}
     while Step do begin
       ColumnsToJSON(W);
       W.Add(',');
       inc(result);
     end;
+    {$ifdef SYNDB_SILENCE}
+    fSQLLogTimer.Pause;
+    {$endif}
     ReleaseRows;
     if (result=0) and W.Expand then begin
       // we want the field names at least, even with no data (RowCount=0)
@@ -7018,6 +7047,9 @@ begin
     W.CancelLastChar;
     W.AddCR;
     // add CSV rows
+    {$ifdef SYNDB_SILENCE}
+    fSQLLogTimer.Resume;
+    {$endif}
     while Step do begin
       for F := 0 to FMax do begin
         ColumnToSQLVar(F,V,tmp);
@@ -7052,6 +7084,9 @@ begin
       end;
       inc(result);
     end;
+    {$ifdef SYNDB_SILENCE}
+    fSQLLogTimer.Pause;
+    {$endif}
     ReleaseRows;
     W.FlushFinal;
   finally
@@ -7304,23 +7339,35 @@ end;
 
 function TSQLDBStatement.SQLLogBegin(level: TSynLogInfo): TSynLog;
 begin
+  if level = sllDB then // prepare
+    fSQLLogTimer.Start else
+    fSQLLogTimer.Resume;
+  {$ifdef SYNDB_SILENCE}
+  result := nil;
+  {$else}
   result := SynDBLog.Add;
   if result <> nil then
     if level in result.Family.Level then
     begin
       fSQLLogLevel := level;
-      fSQLLogTimer.Start;
       if level = sllSQL then
         ComputeSQLWithInlinedParams;
     end
     else
       result := nil;
   fSQLLogLog := result;
+  {$endif}
 end;
 
 function TSQLDBStatement.SQLLogEnd(msg: PShortString): Int64;
+{$ifndef SYNDB_SILENCE}
 var tmp: TShort16;
+{$endif}
 begin
+  fSQLLogTimer.Pause;
+  {$ifdef SYNDB_SILENCE}
+  result := fSQLLogTimer.LastTimeInMicroSec;
+  {$else}
   result := 0;
   if fSQLLogLog=nil then
     exit;
@@ -7332,7 +7379,7 @@ begin
       msg := @tmp;
     end;
     fSQLLogLog.Log(fSQLLogLevel, 'ExecutePrepared %% %',
-      [fSQLLogTimer.Stop, msg^, fSQLWithInlinedParams], self)
+      [fSQLLogTimer.Time, msg^, fSQLWithInlinedParams], self)
   end
   else begin
     if msg=nil then
@@ -7341,17 +7388,20 @@ begin
   end;
   result := fSQLLogTimer.LastTimeInMicroSec;
   fSQLLogLog := nil;
+  {$endif}
 end;
 
 function TSQLDBStatement.SQLLogEnd(const Fmt: RawUTF8; const Args: array of const): Int64;
 var tmp: shortstring;
 begin
+  tmp[0] := #0;
+  {$ifndef SYNDB_SILENCE}
   result := 0;
   if fSQLLogLog=nil then
     exit;
-  if Fmt='' then
-    tmp[0] := #0 else
+  if Fmt<>'' then
     FormatShort(Fmt,Args,tmp);
+  {$endif}
   result := SQLLogEnd(@tmp);
 end;
 
@@ -7529,7 +7579,7 @@ end;
 procedure TSQLDBStatement.Reset;
 begin
   fSQLWithInlinedParams := '';
-  // a do-nothing default method (used e.g. for OCI)
+  fSQLLogTimer.Init; // reset timer (for cached statement for example)
 end;
 
 procedure TSQLDBStatement.ReleaseRows;
@@ -7743,15 +7793,16 @@ begin
   // -> we have nothing to do but return the current value! :)
   with fParams[Param] do begin
     result := VType;
-    case VType of
-      ftInt64:     Value := {$ifdef DELPHI5OROLDER}integer{$endif}(VInt64);
-      ftDouble:    Value := unaligned(PDouble(@VInt64)^);
-      ftCurrency:  Value := PCurrency(@VInt64)^;
-      ftDate:      Value := PDateTime(@VInt64)^;
-      ftUTF8:      RawUTF8ToVariant(RawUTF8(VData),Value);
-      ftBlob:      RawByteStringToVariant(VData,Value);
-      else         SetVariantNull(Value)
-    end;
+    if VArray=nil then
+      case VType of
+        ftInt64:     Value := {$ifdef DELPHI5OROLDER}integer{$endif}(VInt64);
+        ftDouble:    Value := unaligned(PDouble(@VInt64)^);
+        ftCurrency:  Value := PCurrency(@VInt64)^;
+        ftDate:      Value := PDateTime(@VInt64)^;
+        ftUTF8:      RawUTF8ToVariant(RawUTF8(VData),Value);
+        ftBlob:      RawByteStringToVariant(VData,Value);
+        else         SetVariantNull(Value)
+      end else SetVariantNull(Value);
   end;
 end;
 {$endif}
@@ -7761,17 +7812,19 @@ procedure TSQLDBStatementWithParams.AddParamValueAsText(Param: integer; Dest: TT
 begin
   dec(Param);
   if cardinal(Param)>=cardinal(fParamCount) then
-    Dest.Add(',') else
+    Dest.AddShort('null') else
     with fParams[Param] do
-    case VType of
-      ftInt64:    Dest.Add({$ifdef DELPHI5OROLDER}integer{$endif}(VInt64));
-      ftDouble:   Dest.AddDouble(unaligned(PDouble(@VInt64)^));
-      ftCurrency: Dest.AddCurr64(VInt64);
-      ftDate:     Dest.AddDateTime(PDateTime(@VInt64),' ','''');
-      ftUTF8:     Dest.AddQuotedStr(pointer(VData),'''',MaxCharCount);
-      ftBlob:     Dest.AddU(length(VData));
-      else        Dest.AddShort('null');
-    end;
+    if VArray=nil then
+      case VType of
+        ftInt64:    Dest.Add({$ifdef DELPHI5OROLDER}integer{$endif}(VInt64));
+        ftDouble:   Dest.AddDouble(unaligned(PDouble(@VInt64)^));
+        ftCurrency: Dest.AddCurr64(VInt64);
+        ftDate:     Dest.AddDateTime(PDateTime(@VInt64),' ','''');
+        ftUTF8:     Dest.AddQuotedStr(pointer(VData),'''',MaxCharCount);
+        ftBlob:     Dest.AddU(length(VData));
+        else        Dest.AddShort('null');
+      end
+      else Dest.AddString(VArray[0]); // first item is enough in the logs
 end;
 
 procedure TSQLDBStatementWithParams.BindArray(Param: Integer;
@@ -8008,6 +8061,7 @@ begin
       break else // allows 'END;' at the end of a statement
       dec(L);    // trim ' ' or ';' right (last ';' could be found incorrect)
   if PosExChar('?',aSQL)>0 then begin
+    aNewSQL:= '';
     // change ? into :AA :BA ..
     c := ':AA';
     i := 0;
@@ -8048,7 +8102,7 @@ begin
 end;
 
 function ReplaceParamsByNumbers(const aSQL: RawUTF8; var aNewSQL: RawUTF8;
-  IndexChar: AnsiChar): integer;
+  IndexChar: AnsiChar; AllowSemicolon: boolean): integer;
 var
   ndx, L: PtrInt;
   s, d: PUTF8Char;
@@ -8092,7 +8146,7 @@ begin
           else
             break;
       until false;
-    end else if c = ';' then
+    end else if (c = ';') and not AllowSemicolon then
       exit; // complex expression can not be prepared
     inc(s);
   end;
@@ -8933,9 +8987,10 @@ end;
 { ESQLDBException }
 
 constructor ESQLDBException.CreateUTF8(const Format: RawUTF8; const Args: array of const);
-var msg, sql: RawUTF8;
+var msg {$ifndef SYNDB_SILENCE}, sql{$endif}: RawUTF8;
 begin
   msg := FormatUTF8(Format,Args);
+  {$ifndef SYNDB_SILENCE}
   if (length(Args)>0) and (Args[0].VType=vtObject) and (Args[0].VObject<>nil) then
     if Args[0].VObject.InheritsFrom(TSQLDBStatement) then begin
       fStatement := TSQLDBStatement(Args[0].VObject);
@@ -8948,6 +9003,7 @@ begin
         msg := msg+' - '+sql;
       end;
     end;
+  {$endif}
   inherited Create(UTF8ToString(msg));
 end;
 

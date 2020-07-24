@@ -957,6 +957,10 @@ procedure CopyCollection(Source, Dest: TCollection);
 // - will also reset the published properties of the nested classes
 procedure SetDefaultValuesObject(Value: TObject);
 
+/// returns TRUE on a nil instance or if all its published properties are default/0
+// - calls internally TPropInfo.IsDefaultOrVoid()
+function IsObjectDefaultOrVoid(Value: TObject): boolean;
+
 /// will reset all the object properties to their default
 // - strings will be set to '', numbers to 0
 // - if FreeAndNilNestedObjects is the default FALSE, will recursively reset
@@ -1650,6 +1654,7 @@ type
     /// return the Default RTTI value defined for this property, or 0 if not set
     function DefaultOr0: integer; {$ifdef HASINLINE}inline;{$endif}
     /// return TRUE if the property has its Default RTTI value, or is 0/""/nil
+    // - will call function IsObjectDefaultOrVoid() for class properties
     function IsDefaultOrVoid(Instance: TObject): boolean;
     /// compute in how many bytes this property is stored
     function RetrieveFieldSize: integer;
@@ -7831,9 +7836,10 @@ type
     // (no additional memory buffer is allocated)
     function ParseAndConvert(Buffer: PUTF8Char; BufferLen: integer): boolean;
     /// will check then set (if needed) internal fPrivateCopy[Hash] values
-    // - returns TRUE if content changed (then fPrivateCopy+fPrivateCopyHash
-    // will be updated using crc32c hash)
-    function PrivateCopyChanged(aJSON: PUTF8Char; aLen: integer): boolean;
+    // - returns TRUE if fPrivateCopy content changed (then fPrivateCopyHash
+    // will be updated using crc32c hash if aUpdateHash is set)
+    function PrivateCopyChanged(aJSON: PUTF8Char; aLen: integer;
+      aUpdateHash: boolean): boolean;
   public
     /// create the result table from a JSON-formated Data message
     // - the JSON data is parsed and formatted in-place
@@ -27817,15 +27823,20 @@ end;
 
 { TSQLTableJSON }
 
-function TSQLTableJSON.PrivateCopyChanged(aJSON: PUTF8Char; aLen: integer): boolean;
+function TSQLTableJSON.PrivateCopyChanged(aJSON: PUTF8Char; aLen: integer;
+  aUpdateHash: boolean): boolean;
 var Hash: cardinal;
 begin
-  Hash := crc32c(0,pointer(aJSON),aLen);
-  result := (fPrivateCopyHash=0) or (Hash=0) or (Hash<>fPrivateCopyHash);
-  if not result then
-    exit;
-  FastSetString(fPrivateCopy,aJSON,aLen+16); // +16 for SSE4.2 read-ahead
-  fPrivateCopyHash := Hash;
+  if aUpdateHash then begin
+    Hash := crc32c(0,pointer(aJSON),aLen);
+    result := (fPrivateCopyHash=0) or (Hash=0) or (Hash<>fPrivateCopyHash);
+    if not result then
+      exit;
+    fPrivateCopyHash := Hash;
+  end else
+    result := true; // from Create() for better performance on single use
+  FastSetString(fPrivateCopy,nil,aLen+16); // +16 for SSE4.2 read-ahead
+  MoveFast(pointer(aJSON)^,pointer(fPrivateCopy)^,aLen+1); // +1 for trailing #0
 end;
 
 function TSQLTableJSON.ParseAndConvert(Buffer: PUTF8Char; BufferLen: integer): boolean;
@@ -27966,7 +27977,7 @@ function TSQLTableJSON.UpdateFrom(const aJSON: RawUTF8; var Refreshed: boolean;
 var len: Integer;
 begin
   len := length(aJSON);
-  if PrivateCopyChanged(pointer(aJSON),len) then
+  if PrivateCopyChanged(pointer(aJSON),len,{updatehash=}true) then
     if ParseAndConvert(pointer(fPrivateCopy),len) then begin
      // parse success from new aJSON data -> need some other update?
      if Assigned(fIDColumn) then begin
@@ -27997,7 +28008,7 @@ constructor TSQLTableJSON.Create(const aSQL, aJSON: RawUTF8);
 var len: integer;
 begin
   len := length(aJSON);
-  FastSetString(fPrivateCopy,pointer(aJSON),len+16); // +16 for SSE4.2 read-ahead
+  PrivateCopyChanged(pointer(aJSON),len,{updatehash=}false);
   Create(aSQL,pointer(fPrivateCopy),len);
 end;
 
@@ -28013,7 +28024,7 @@ constructor TSQLTableJSON.CreateFromTables(const Tables: array of TSQLRecordClas
 var len: integer;
 begin
   len := length(aJSON);
-  FastSetString(fPrivateCopy,pointer(aJSON),len+16);
+  PrivateCopyChanged(pointer(aJSON),len,{updatehash=}false);
   CreateFromTables(Tables,aSQL,pointer(fPrivateCopy),len);
 end;
 
@@ -28029,7 +28040,7 @@ constructor TSQLTableJSON.CreateWithColumnTypes(const ColumnTypes: array of TSQL
 var len: integer;
 begin
   len := length(aJSON);
-  FastSetString(fPrivateCopy,pointer(aJSON),len+16);
+  PrivateCopyChanged(pointer(aJSON),len,{updatehash=}false);
   CreateWithColumnTypes(ColumnTypes,aSQL,pointer(fPrivateCopy),len);
 end;
 
@@ -28990,14 +29001,16 @@ begin
   tkInt64{$ifdef FPC},tkQWord{$endif}:
     result := GetInt64Prop(Instance)=0;
   tkLString,{$ifdef HASVARUSTRING}tkUString,{$endif}{$ifdef FPC}tkLStringOld,{$endif}
-  tkWString,tkDynArray,tkClass,tkInterface: begin
+  tkWString,tkDynArray,tkInterface: begin
     p := GetFieldAddr(Instance);
     result := (p<>nil) and (p^=nil);
   end;
   tkVariant: begin
     p := GetFieldAddr(Instance);
-    result := (p<>nil) and VarDataIsEmptyOrNull(p^);
+    result := (p<>nil) and VarDataIsEmptyOrNull(p);
   end;
+  tkClass:
+    result := IsObjectDefaultOrVoid(GetObjProp(Instance));
   else result := false;
   end;
 end;
@@ -31217,9 +31230,12 @@ begin
     fields := Props.Props.Fields;
     case Props.Kind of
     rFTS3, rFTS4, rFTS5: begin
-      if (Props.fFTSWithoutContentFields<>'') and (Props.fFTSWithoutContentTableIndex>=0) then
+      if (Props.fFTSWithoutContentFields<>'') and (Props.fFTSWithoutContentTableIndex>=0) then begin
         result := FormatUTF8('%content="%",',[result,
           aModel.Tables[Props.fFTSWithoutContentTableIndex].SQLTableName]);
+        if Props.Kind = rFTS5 then
+           result := FormatUTF8('%content_rowid="ID",',[result]);
+      end;
       for i := 0 to fields.Count-1 do
         result := result+fields.List[i].Name+',';
       tokenizer := 'simple';
@@ -48797,6 +48813,25 @@ begin
   until c=TObject;
 end;
 
+function IsObjectDefaultOrVoid(Value: TObject): boolean;
+var i: integer;
+    C: TClass;
+    P: PPropinfo;
+begin
+  if Value<>nil then begin
+    result := false;
+    C := Value.ClassType;
+    repeat
+      for i := 1 to InternalClassPropInfo(C,P) do
+        if P^.IsDefaultOrVoid(Value) then
+          P := P^.Next else
+          exit;
+      C := GetClassParent(C);
+    until C=TObject;
+  end;
+  result := true;
+end;
+
 procedure ClearObject(Value: TObject; FreeAndNilNestedObjects: boolean=false);
 var p: PPropInfo;
     c: TClass;
@@ -49262,18 +49297,34 @@ begin
   fts := Props.Props.SQLTableName;
   ftsfields := Props.Props.SQLTableSimpleFieldsNoRowID;
   // see http://www.sqlite.org/fts3.html#*fts4content
-  Server.ExecuteFmt('CREATE TRIGGER %_bu BEFORE UPDATE ON % '+
-    'BEGIN DELETE FROM % WHERE docid=old.rowid; END;',
-    [main,main,fts]);
-  Server.ExecuteFmt('CREATE TRIGGER %_bd BEFORE DELETE ON % '+
-    'BEGIN DELETE FROM % WHERE docid=old.rowid; END;',
-    [main,main,fts]);
-  Server.ExecuteFmt('CREATE TRIGGER %_au AFTER UPDATE ON % '+
-    'BEGIN INSERT INTO %(docid,%) VALUES(new.rowid%); END;',
-    [main,main,fts,ftsfields,Props.fFTSWithoutContentFields]);
-  Server.ExecuteFmt('CREATE TRIGGER %_ai AFTER INSERT ON % '+
-    'BEGIN INSERT INTO %(docid,%) VALUES(new.rowid%); END;',
-    [main,main,fts,ftsfields,Props.fFTSWithoutContentFields]);
+  if Props.Kind=rFTS5 then begin
+    // In fts 5 we can't use docid only rowid, also use insert() values('delete',) to delete record
+    Server.ExecuteFmt('CREATE TRIGGER %_bu BEFORE UPDATE ON % '+
+      'BEGIN INSERT INTO %(%,rowid,%) VALUES(''delete'',old.rowid%); END;',
+      [main,main,fts,fts,ftsfields, StringReplaceAll(Props.fFTSWithoutContentFields, 'new.', 'old.')]);
+    Server.ExecuteFmt('CREATE TRIGGER %_bd BEFORE DELETE ON % '+
+      'BEGIN INSERT INTO %(%,rowid,%) VALUES(''delete'',old.rowid%); END;',
+      [main,main,fts,fts,ftsfields, StringReplaceAll(Props.fFTSWithoutContentFields, 'new.', 'old.')]);
+    Server.ExecuteFmt('CREATE TRIGGER %_au AFTER UPDATE ON % '+
+      'BEGIN INSERT INTO %(rowid,%) VALUES(new.rowid%); END;',
+      [main,main,fts,ftsfields,Props.fFTSWithoutContentFields]);
+    Server.ExecuteFmt('CREATE TRIGGER %_ai AFTER INSERT ON % '+
+      'BEGIN INSERT INTO %(rowid,%) VALUES(new.rowid%); END;',
+      [main,main,fts,ftsfields,Props.fFTSWithoutContentFields]);
+  end else begin
+    Server.ExecuteFmt('CREATE TRIGGER %_bu BEFORE UPDATE ON % '+
+      'BEGIN DELETE FROM % WHERE docid=old.rowid; END;',
+      [main,main,fts]);
+    Server.ExecuteFmt('CREATE TRIGGER %_bd BEFORE DELETE ON % '+
+      'BEGIN DELETE FROM % WHERE docid=old.rowid; END;',
+      [main,main,fts]);
+    Server.ExecuteFmt('CREATE TRIGGER %_au AFTER UPDATE ON % '+
+      'BEGIN INSERT INTO %(docid,%) VALUES(new.rowid%); END;',
+      [main,main,fts,ftsfields,Props.fFTSWithoutContentFields]);
+    Server.ExecuteFmt('CREATE TRIGGER %_ai AFTER INSERT ON % '+
+      'BEGIN INSERT INTO %(docid,%) VALUES(new.rowid%); END;',
+      [main,main,fts,ftsfields,Props.fFTSWithoutContentFields]);
+  end;
 end;
 
 
@@ -50925,13 +50976,14 @@ var Added: boolean;
       {$endif NOVARIANTS}
       tkClass: begin
         Obj := P^.GetObjProp(Value);
-        if PropIsIDTypeCastedField(P,IsObj,Value) then begin
-          HR(P);
-          Add(PtrInt(Obj)); // not true instances, but ID
-        end else if Obj<>nil then begin
-          HR(P); // TPersistent or any class defined with $M+
-          WriteObject(Obj,Options);
-        end;
+        if not(woDontStore0 in Options) or not IsObjectDefaultOrVoid(Obj) then
+          if PropIsIDTypeCastedField(P,IsObj,Value) then begin
+            HR(P);
+            Add(PtrInt(Obj)); // not true instances, but ID
+          end else if Obj<>nil then begin
+            HR(P); // TPersistent or any class defined with $M+
+            WriteObject(Obj,Options);
+          end;
       end;
       // tkString (shortstring) and tkInterface is not handled
     end;
