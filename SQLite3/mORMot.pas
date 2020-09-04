@@ -30258,10 +30258,10 @@ end;
 function SQLFromSelect(const TableName, Select, Where, SimpleFields: RawUTF8): RawUTF8;
 begin
   if Select='*' then
-     // don't send BLOB values to query: retrieve all other fields
-    result := 'SELECT '+SimpleFields  else
-    result := 'SELECT '+Select;
-  result := result+' FROM '+TableName+SQLFromWhere(Where);
+    // don't send BLOB values to query: retrieve simple = all non-blob fields
+    result := SimpleFields else
+    result := Select;
+  result := 'SELECT '+result+' FROM '+TableName+SQLFromWhere(Where);
 end;
 
 function SelectInClause(const PropName: RawUTF8; const Values: array of RawUTF8;
@@ -37427,17 +37427,16 @@ begin
     exit;
   InternalURI(Call^);
   if ((Sender=nil) or OnIdleBackgroundThreadActive) and
-      not(isDestroying in fInternalState) then
+      not(isDestroying in fInternalState) then begin
     if (Call^.OutStatus=HTTP_NOTIMPLEMENTED) and (isOpened in fInternalState) then begin
       InternalClose; // force recreate connection
       Exclude(fInternalState,isOpened);
-      if ((Sender=nil) or OnIdleBackgroundThreadActive) then begin
+      if ((Sender=nil) or OnIdleBackgroundThreadActive) then
         InternalURI(Call^); // try request again
-        if Call^.OutStatus<>HTTP_NOTIMPLEMENTED then
-          Include(fInternalState,isOpened);
-      end;
-    end else
+    end;
+    if Call^.OutStatus<>HTTP_NOTIMPLEMENTED then
       Include(fInternalState,isOpened);
+  end;
 end;
 
 function TSQLRestClientURI.GetOnIdleBackgroundThreadActive: boolean;

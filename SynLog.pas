@@ -476,6 +476,7 @@ type
     fRotateFileCount: cardinal;
     fRotateFileSize: cardinal;
     fRotateFileAtHour: integer;
+    fRotateFileNoCompression: boolean;
     function CreateSynLog: TSynLog;
     procedure StartAutoFlush;
     procedure SetDestinationPath(const value: TFileName);
@@ -700,6 +701,8 @@ type
     // specified hour
     // - is not used if RotateFileCount is left to its default 0
     property RotateFileDailyAtHour: integer read fRotateFileAtHour write fRotateFileAtHour;
+    /// if set to TRUE, no #.synlz will be created at rotation but plain #.log file
+    property RotateFileNoCompression: boolean read fRotateFileNoCompression write fRotateFileNoCompression;
     /// the recursive depth of stack trace symbol to write
     // - used only if exceptions are handled, or by sllStackTrace level
     // - default value is 30, maximum is 255
@@ -4114,16 +4117,27 @@ function TSynLog.ConsoleEcho(Sender: TTextWriter; Level: TSynLogInfo;
 {$ifdef MSWINDOWS}
 var tmp: AnsiString;
 {$endif}
+{$ifdef LINUXNOTBSD}
+var
+  tmp, mtmp: RawUTF8;
+  jvec: Array[0..1] of TioVec;
+{$endif}
 begin
   result := true;
   if not (Level in fFamily.fEchoToConsole) then
     exit;
   {$ifdef LINUXNOTBSD}
   if Family.EchoToConsoleUseJournal then begin
+    if length(Text)<18 then // should be at last "20200615 08003008  "
+      exit;
+    FormatUTF8('PRIORITY=%', [LOG_TO_SYSLOG[Level]],tmp);
+    jvec[0].iov_base := pointer(tmp);
+    jvec[0].iov_len := length(tmp);
     // skip time "20200615 08003008  ." - journal do it for us; and first space after it
-    if length(Text)>18 then
-      ExternalLibraries.sd_journal_print(longint(LOG_TO_SYSLOG[Level]),
-        [PUTF8Char(pointer(Text))+18]);
+    FormatUTF8('MESSAGE=%', [PUTF8Char(pointer(Text))+18],mtmp);
+    jvec[1].iov_base := pointer(mtmp);
+    jvec[1].iov_len := length(mtmp);
+    ExternalLibraries.sd_journal_sendv(@jvec[0],2);
     exit;
   end;
   {$endif}
@@ -4546,6 +4560,7 @@ begin
 end;
 
 procedure TSynLog.PerformRotation;
+const _LOG_SYNLZ: array[boolean] of TFileName = ('.synlz','.log');
 var currentMaxSynLZ: cardinal;
     i: integer;
     FN: array of TFileName;
@@ -4559,7 +4574,8 @@ begin
     if fFamily.fRotateFileCount>1 then begin
       SetLength(FN,fFamily.fRotateFileCount-1);
       for i := fFamily.fRotateFileCount-1 downto 1 do begin
-        FN[i-1] := ChangeFileExt(fFileName,'.'+IntToStr(i)+'.synlz');
+        FN[i-1] := ChangeFileExt(fFileName,
+          '.'+IntToStr(i)+_LOG_SYNLZ[fFamily.fRotateFileNoCompression]);
         if (currentMaxSynLZ=0) and FileExists(FN[i-1]) then
           currentMaxSynLZ := i;
       end;
@@ -4567,7 +4583,9 @@ begin
         DeleteFile(FN[currentMaxSynLZ-1]); // delete e.g. '9.synlz'
       for i := fFamily.fRotateFileCount-2 downto 1 do
         RenameFile(FN[i-1],FN[i]); // e.g. '8.synlz' -> '9.synlz'
-      FileSynLZ(fFileName,FN[0],LOG_MAGIC); // main -> '1.synlz'
+      if fFamily.fRotateFileNoCompression then
+        RenameFile(fFileName,FN[0]) else      // main -> '1.log'
+        FileSynLZ(fFileName,FN[0],LOG_MAGIC); // main -> '1.synlz'
     end;
     DeleteFile(fFileName);
   end;
@@ -5118,8 +5136,9 @@ begin
   end else begin
     //2020-06-18T13:28:20.754089+0300 ub[12316]:
     Iso8601ToDateTimePUTF8CharVar(pointer(fMap.Buffer),26,fStartDateTime);
-    if fStartDateTime > 0 then begin
-      fIsJournald := true;
+    if unaligned(fStartDateTime) <> 0 then begin
+      if (fMap.Buffer+8)^ <> ' ' then //20200821 14450738 ... - syn log without header
+        fIsJournald := true;
       fHeaderLinesCount := 0;
       fLineHeaderCountToIgnore := 0;
     end;
@@ -5128,8 +5147,8 @@ begin
   // 2. fast retrieval of header
   OK := false;
   try
-    // journald export
-    if fIsJournald then begin
+    // journald export or TSynLog WITHOUT regular header
+    if fIsJournald or (fLineHeaderCountToIgnore=0) then begin
       if LineSizeSmallerThan(1,34) then exit;
       Iso8601ToDateTimePUTF8CharVar(fLines[1],26,fStartDateTime);
       if fStartDateTime=0 then

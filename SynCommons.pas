@@ -8359,6 +8359,9 @@ type
   TSynLogInfoDynArray = array of TSynLogInfo;
 
 
+  /// event signature for TTextWriter.OnFlushToStream callback
+  TOnTextWriterFlush = procedure(Text: PUTF8Char; Len: PtrInt) of object;
+
   /// available options for TTextWriter.WriteObject() method
   // - woHumanReadable will add some line feeds and indentation to the content,
   // to make it more friendly to the human eye
@@ -8502,10 +8505,12 @@ type
     // internal temporary buffer
     fTempBufSize: Integer;
     fTempBuf: PUTF8Char;
+    fOnFlushToStream: TOnTextWriterFlush;
     fOnWriteObject: TOnTextWriterObjectProp;
     /// used by WriteObjectAsString/AddDynArrayJSONAsString methods
     fInternalJSONWriter: TTextWriter;
     fHumanReadableLevel: integer;
+    procedure WriteToStream(data: pointer; len: PtrUInt); virtual;
     function GetTextLength: PtrUInt;
     procedure SetStream(aStream: TStream);
     procedure SetBuffer(aBuf: pointer; aBufSize: integer);
@@ -9253,6 +9258,8 @@ type
     // - see PendingBytes for the number of bytes currently in the memory buffer
     // or WrittenBytes for the number of bytes already written to disk
     property TextLength: PtrUInt read GetTextLength;
+    /// optional event called before FlushToStream method process
+    property OnFlushToStream: TOnTextWriterFlush read fOnFlushToStream write fOnFlushToStream;
     /// allows to override default WriteObject property JSON serialization
     property OnWriteObject: TOnTextWriterObjectProp read fOnWriteObject write fOnWriteObject;
     /// the internal TStream used for storage
@@ -10832,9 +10839,11 @@ function JsonObjectsByPath(JsonObject,PropPath: PUTF8Char): RawUTF8;
 // - is the reverse of the TTextWriter.AddJSONArraysAsJSONObject() method
 function JSONObjectAsJSONArrays(JSON: PUTF8Char; out keys,values: RawUTF8): boolean;
 
-/// remove comments from a text buffer before passing it to JSON parser
+/// remove comments and trailing commas from a text buffer before passing it to JSON parser
 // - handle two types of comments: starting from // till end of line
 // or /* ..... */ blocks anywhere in the text content
+// - trailing commas is replaced by ' ', so resulting JSON is valid for parsers
+// what not allows trailing commas (browsers for example)
 // - may be used to prepare configuration files before loading;
 // for example we store server configuration in file config.json and
 // put some comments in this file then code for loading is:
@@ -12046,6 +12055,12 @@ procedure FillZero(var secret: RawUTF8); overload;
 procedure FillZero(var dest; count: PtrInt); overload;
   {$ifdef HASINLINE}inline;{$endif}
 
+/// returns TRUE if all bytes of both buffers do match
+// - this function is not sensitive to any timing attack, so is designed
+// for cryptographic purposes - use CompareMem/CompareMemSmall/CompareMemFixed
+// as faster alternatives for general-purpose code
+function IsEqual(const A,B; count: PtrInt): boolean; overload;
+
 /// fast computation of two 64-bit unsigned integers into a 128-bit value
 procedure mul64x64(const left, right: QWord; out product: THash128Rec);
   {$ifndef CPUINTEL}inline;{$endif}
@@ -12533,11 +12548,20 @@ type
     Value: Int64;
     /// extract the date and time content in Value into individual values
     procedure Expand(out Date: TSynSystemTime);
-    /// convert to Iso-8601 encoded text
+    /// convert to Iso-8601 encoded text, truncated to date/time only if needed
     function Text(Expanded: boolean; FirstTimeChar: AnsiChar = 'T'): RawUTF8; overload;
-    /// convert to Iso-8601 encoded text
+    /// convert to Iso-8601 encoded text, truncated to date/time only if needed
     function Text(Dest: PUTF8Char; Expanded: boolean;
       FirstTimeChar: AnsiChar = 'T'): integer; overload;
+    /// convert to Iso-8601 encoded text with date and time part
+    // - never truncate to date/time nor return '' as Text() does
+    function FullText(Expanded: boolean; FirstTimeChar: AnsiChar = 'T';
+      QuotedChar: AnsiChar = #0): RawUTF8; overload;
+      {$ifdef FPC}inline;{$endif} //  URW1111 on Delphi 2010 and URW1136 on XE
+    /// convert to Iso-8601 encoded text with date and time part
+    // - never truncate to date/time or return '' as Text() does
+    function FullText(Dest: PUTF8Char; Expanded: boolean;
+      FirstTimeChar: AnsiChar = 'T'; QuotedChar: AnsiChar = #0): PUTF8Char; overload;
     /// convert to ready-to-be displayed text
     // - using i18nDateText global event, if set (e.g. by mORMoti18n.pas)
     function i18nText: string;
@@ -12727,9 +12751,20 @@ procedure IntervalTextToDateTimeVar(Text: PUTF8Char; var result: TDateTime);
 // - use 'YYYYMMDDThhmmss' format if not Expanded
 // - use 'YYYY-MM-DDThh:mm:ss' format if Expanded
 // - if WithMS is TRUE, will append '.sss' for milliseconds resolution
+// - if QuotedChar is not default #0, will (double) quote the resulted text
 // - you may rather use DateTimeToIso8601Text() to handle 0 or date-only values
 function DateTimeToIso8601(D: TDateTime; Expanded: boolean;
-  FirstChar: AnsiChar='T'; WithMS: boolean=false): RawUTF8;
+  FirstChar: AnsiChar='T'; WithMS: boolean=false; QuotedChar: AnsiChar=#0): RawUTF8; overload;
+
+/// basic Date/Time conversion into ISO-8601
+// - use 'YYYYMMDDThhmmss' format if not Expanded
+// - use 'YYYY-MM-DDThh:mm:ss' format if Expanded
+// - if WithMS is TRUE, will append '.sss' for milliseconds resolution
+// - if QuotedChar is not default #0, will (double) quote the resulted text
+// - you may rather use DateTimeToIso8601Text() to handle 0 or date-only values
+// - returns the number of chars written to P^ buffer
+function DateTimeToIso8601(P: PUTF8Char; D: TDateTime; Expanded: boolean;
+  FirstChar: AnsiChar='T'; WithMS: boolean=false; QuotedChar: AnsiChar=#0): integer; overload;
 
 /// basic Date conversion into ISO-8601
 // - use 'YYYYMMDD' format if not Expanded
@@ -12757,14 +12792,14 @@ function TimeToIso8601(Time: TDateTime; Expanded: boolean; FirstChar: AnsiChar='
 /// Write a Date to P^ Ansi buffer
 // - if Expanded is false, 'YYYYMMDD' date format is used
 // - if Expanded is true, 'YYYY-MM-DD' date format is used
-procedure DateToIso8601PChar(P: PUTF8Char; Expanded: boolean; Y,M,D: PtrUInt); overload;
+function DateToIso8601PChar(P: PUTF8Char; Expanded: boolean; Y,M,D: PtrUInt): PUTF8Char; overload;
 
 /// convert a date into 'YYYY-MM-DD' date format
 // - resulting text is compatible with all ISO-8601 functions
 function DateToIso8601Text(Date: TDateTime): RawUTF8;
 
 /// Write a Date/Time to P^ Ansi buffer
-procedure DateToIso8601PChar(Date: TDateTime; P: PUTF8Char; Expanded: boolean); overload;
+function DateToIso8601PChar(Date: TDateTime; P: PUTF8Char; Expanded: boolean): PUTF8Char; overload;
 
 /// Write a TDateTime value, expanded as Iso-8601 encoded text into P^ Ansi buffer
 // - if DT=0, returns ''
@@ -12811,16 +12846,16 @@ procedure DateTimeToIso8601StringVar(DT: TDateTime; FirstChar: AnsiChar; var res
 // - if Expanded is true, 'Thh:mm:ss' time format is used
 // - you can custom the first char in from of the resulting text time
 // - if WithMS is TRUE, will append MS as '.sss' for milliseconds resolution
-procedure TimeToIso8601PChar(P: PUTF8Char; Expanded: boolean; H,M,S,MS: PtrUInt;
-  FirstChar: AnsiChar = 'T'; WithMS: boolean=false); overload;
+function TimeToIso8601PChar(P: PUTF8Char; Expanded: boolean; H,M,S,MS: PtrUInt;
+  FirstChar: AnsiChar = 'T'; WithMS: boolean=false): PUTF8Char; overload;
 
 /// Write a Time to P^ Ansi buffer
 // - if Expanded is false, 'Thhmmss' time format is used
 // - if Expanded is true, 'Thh:mm:ss' time format is used
 // - you can custom the first char in from of the resulting text time
 // - if WithMS is TRUE, will append '.sss' for milliseconds resolution
-procedure TimeToIso8601PChar(Time: TDateTime; P: PUTF8Char; Expanded: boolean;
-  FirstChar: AnsiChar = 'T'; WithMS: boolean=false); overload;
+function TimeToIso8601PChar(Time: TDateTime; P: PUTF8Char; Expanded: boolean;
+  FirstChar: AnsiChar = 'T'; WithMS: boolean=false): PUTF8Char; overload;
 
 var
   /// custom TTimeLog date to ready to be displayed text function
@@ -22971,6 +23006,17 @@ asm
 end;
 {$endif}
 
+function IsEqual(const A,B; count: PtrInt): boolean;
+var perbyte: boolean; // ensure no optimization takes place
+begin
+  result := true;
+  while count>0 do begin
+    dec(count);
+    perbyte := PByteArray(@A)[count]=PByteArray(@B)[count];
+    result := result and perbyte;
+  end;
+end;
+
 function PosCharAny(Str: PUTF8Char; Characters: PAnsiChar): PUTF8Char;
 var s: PAnsiChar;
     c: AnsiChar;
@@ -30888,7 +30934,7 @@ end;
 
 function SearchRecValidFolder(const F: TSearchRec): boolean;
 begin
-  result := (F.Attr and (faDirectory {$ifdef MSWINDOWS}and faHidden{$endif})=faDirectory) and
+  result := (F.Attr and (faDirectory {$ifdef MSWINDOWS}+faHidden{$endif})=faDirectory) and
     (F.Name<>'') and (F.Name<>'.') and (F.Name<>'..');
 end;
 
@@ -37766,7 +37812,7 @@ begin
   result := PTimeLogBits(@Timestamp)^.ToUnixTime;
 end;
 
-procedure DateToIso8601PChar(P: PUTF8Char; Expanded: boolean; Y,M,D: PtrUInt);
+function DateToIso8601PChar(P: PUTF8Char; Expanded: boolean; Y,M,D: PtrUInt): PUTF8Char;
 // use 'YYYYMMDD' format if not Expanded, 'YYYY-MM-DD' format if Expanded
 var tab: {$ifdef CPUX86NOTPIC}TWordArray absolute TwoDigitLookupW{$else}PWordArray{$endif};
 begin
@@ -37788,10 +37834,11 @@ begin
     inc(P);
   end;
   PWord(P)^ := tab[D];
+  result := P+2;
 end;
 
-procedure TimeToIso8601PChar(P: PUTF8Char; Expanded: boolean; H,M,S,MS: PtrUInt;
-  FirstChar: AnsiChar; WithMS: boolean);
+function TimeToIso8601PChar(P: PUTF8Char; Expanded: boolean; H,M,S,MS: PtrUInt;
+  FirstChar: AnsiChar; WithMS: boolean): PUTF8Char;
 var tab: {$ifdef CPUX86NOTPIC}TWordArray absolute TwoDigitLookupW{$else}PWordArray{$endif};
 begin // use Thhmmss[.sss] format
   if FirstChar<>#0 then begin
@@ -37812,18 +37859,20 @@ begin // use Thhmmss[.sss] format
     inc(P);
   end;
   PWord(P)^ := tab[S];
+  inc(P,2);
   if WithMS then begin
-    inc(P,2);
     {$ifdef CPUX86NOTPIC}YearToPChar(MS{$else}YearToPChar2(tab,MS{$endif},P);
-    P^ := '.'; // override first digit
+    P^ := '.'; // override first '0' digit
+    inc(P,4);
   end;
+  result := P;
 end;
 
-procedure DateToIso8601PChar(Date: TDateTime; P: PUTF8Char; Expanded: boolean);
+function DateToIso8601PChar(Date: TDateTime; P: PUTF8Char; Expanded: boolean): PUTF8Char;
 var T: TSynSystemTime;
 begin // use YYYYMMDD / YYYY-MM-DD date format
   T.FromDate(Date);
-  DateToIso8601PChar(P,Expanded,T.Year,T.Month,T.Day);
+  result := DateToIso8601PChar(P,Expanded,T.Year,T.Month,T.Day);
 end;
 
 function DateToIso8601Text(Date: TDateTime): RawUTF8;
@@ -37835,24 +37884,37 @@ begin // into 'YYYY-MM-DD' date format
   end;
 end;
 
-procedure TimeToIso8601PChar(Time: TDateTime; P: PUTF8Char; Expanded: boolean;
-  FirstChar: AnsiChar; WithMS: boolean);
+function TimeToIso8601PChar(Time: TDateTime; P: PUTF8Char; Expanded: boolean;
+  FirstChar: AnsiChar; WithMS: boolean): PUTF8Char;
 var T: TSynSystemTime;
 begin
   T.FromTime(Time);
-  TimeToIso8601PChar(P,Expanded,T.Hour,T.Minute,T.Second,T.MilliSecond,FirstChar,WithMS);
+  result := TimeToIso8601PChar(P,Expanded,T.Hour,T.Minute,T.Second,T.MilliSecond,FirstChar,WithMS);
+end;
+
+function DateTimeToIso8601(P: PUTF8Char; D: TDateTime; Expanded: boolean;
+  FirstChar: AnsiChar; WithMS: boolean; QuotedChar: AnsiChar): integer;
+var S: PUTF8Char;
+begin
+  S := P;
+  if QuotedChar<>#0 then begin
+    P^ := QuotedChar;
+    inc(P);
+  end;
+  P := DateToIso8601PChar(D,P,Expanded);
+  P := TimeToIso8601PChar(D,P,Expanded,FirstChar,WithMS);
+  if QuotedChar<>#0 then begin
+    P^ := QuotedChar;
+    inc(P);
+  end;
+  result := P-S;
 end;
 
 function DateTimeToIso8601(D: TDateTime; Expanded: boolean;
-  FirstChar: AnsiChar; WithMS: boolean): RawUTF8;
-const ISO8601_LEN: array[boolean,boolean] of integer = ((15,14),(19,18));
+  FirstChar: AnsiChar; WithMS: boolean; QuotedChar: AnsiChar): RawUTF8;
 var tmp: array[0..31] of AnsiChar;
 begin // D=0 is handled in DateTimeToIso8601Text()
-  DateToIso8601PChar(D,tmp,Expanded);
-  if Expanded then
-    TimeToIso8601PChar(D,@tmp[10],true,FirstChar,WithMS) else
-    TimeToIso8601PChar(D,@tmp[8],false,FirstChar,WithMS);
-  FastSetString(result,@tmp,ISO8601_LEN[Expanded,FirstChar=#0]+4*integer(WithMS));
+  FastSetString(result,@tmp,DateTimeToIso8601(@tmp,D,Expanded,FirstChar,WithMS,QuotedChar));
 end;
 
 function DateToIso8601(Date: TDateTime; Expanded: boolean): RawUTF8;
@@ -37907,14 +37969,10 @@ function DateTimeToIso8601ExpandedPChar(const Value: TDateTime; Dest: PUTF8Char;
   FirstChar: AnsiChar; WithMS: boolean): PUTF8Char;
 begin
   if Value<>0 then begin
-    if trunc(Value)<>0 then begin
-      DateToIso8601PChar(Value,Dest,true);
-      inc(Dest,10);
-    end;
-    if frac(Value)<>0 then begin
-      TimeToIso8601PChar(Value,Dest,true,FirstChar,WithMS);
-      inc(Dest,9+4*integer(WithMS));
-    end;
+    if trunc(Value)<>0 then
+      Dest := DateToIso8601PChar(Value,Dest,true);
+    if frac(Value)<>0 then
+      Dest := TimeToIso8601PChar(Value,Dest,true,FirstChar,WithMS);
   end;
   Dest^ := #0;
   result := Dest;
@@ -38291,54 +38349,65 @@ end;
 
 function TTimeLogBits.Text(Dest: PUTF8Char; Expanded: boolean; FirstTimeChar: AnsiChar): integer;
 var lo: PtrUInt;
+    S: PUTF8Char;
 begin
   if Value=0 then begin
     result := 0;
     exit;
   end;
+  S := Dest;
   lo := {$ifdef CPU64}Value{$else}PCardinal(@Value)^{$endif};
-  if lo and (1 shl (6+6+5)-1)=0 then begin
+  if lo and (1 shl (6+6+5)-1)=0 then
     // no Time: just convert date
-    DateToIso8601PChar(Dest, Expanded,
+    result := DateToIso8601PChar(Dest, Expanded,
       {$ifdef CPU64}lo{$else}Value{$endif} shr (6+6+5+5+4),
-      1+(lo shr (6+6+5+5)) and 15, 1+(lo shr (6+6+5)) and 31);
-    if Expanded then
-      result := 10 else
-      result := 8;
-  end else
-  if {$ifdef CPU64}lo{$else}Value{$endif} shr (6+6+5)=0 then begin
+      1+(lo shr (6+6+5+5)) and 15, 1+(lo shr (6+6+5)) and 31)-S else
+  if {$ifdef CPU64}lo{$else}Value{$endif} shr (6+6+5)=0 then
     // no Date: just convert time
-    TimeToIso8601PChar(Dest, Expanded, (lo shr (6+6)) and 31,
-      (lo shr 6) and 63, lo and 63, 0, FirstTimeChar);
-    if Expanded then
-      result := 9 else
-      result := 7;
-    if FirstTimeChar=#0 then
-      dec(result);
-  end else begin
+    result := TimeToIso8601PChar(Dest, Expanded, (lo shr (6+6)) and 31,
+      (lo shr 6) and 63, lo and 63, 0, FirstTimeChar)-S else begin
     // convert time and date
-    DateToIso8601PChar(Dest, Expanded,
+    Dest := DateToIso8601PChar(Dest, Expanded,
       {$ifdef CPU64}lo{$else}Value{$endif} shr (6+6+5+5+4),
       1+(lo shr (6+6+5+5)) and 15, 1+(lo shr (6+6+5)) and 31);
-    if Expanded then
-      inc(Dest,10) else
-      inc(Dest,8);
-    TimeToIso8601PChar(Dest, Expanded, (lo shr (6+6)) and 31,
-      (lo shr 6) and 63, lo and 63, 0, FirstTimeChar);
-    if Expanded then
-      result := 15+4 else
-      result := 15;
-    if FirstTimeChar=#0 then
-      dec(result);
+    result := TimeToIso8601PChar(Dest, Expanded, (lo shr (6+6)) and 31,
+      (lo shr 6) and 63, lo and 63, 0, FirstTimeChar)-S;
   end;
 end;
 
-function TTimeLogBits.Text(Expanded: boolean; FirstTimeChar: AnsiChar = 'T'): RawUTF8;
+function TTimeLogBits.Text(Expanded: boolean; FirstTimeChar: AnsiChar): RawUTF8;
 var tmp: array[0..31] of AnsiChar;
 begin
   if Value=0 then
     result := '' else
     FastSetString(result,@tmp,Text(tmp,Expanded,FirstTimeChar));
+end;
+
+function TTimeLogBits.FullText(Dest: PUTF8Char; Expanded: boolean;
+  FirstTimeChar,QuotedChar: AnsiChar): PUTF8Char;
+var lo: PtrUInt;
+begin // convert full time and date
+  if QuotedChar<>#0 then begin
+    Dest^ := QuotedChar;
+    inc(Dest);
+  end;
+  lo := {$ifdef CPU64}Value{$else}PCardinal(@Value)^{$endif};
+  Dest := DateToIso8601PChar(Dest, Expanded,
+    {$ifdef CPU64}lo{$else}Value{$endif} shr (6+6+5+5+4),
+    1+(lo shr (6+6+5+5)) and 15, 1+(lo shr (6+6+5)) and 31);
+  Dest := TimeToIso8601PChar(Dest, Expanded, (lo shr (6+6)) and 31,
+    (lo shr 6) and 63, lo and 63, 0, FirstTimeChar);
+  if QuotedChar<>#0 then begin
+    Dest^ := QuotedChar;
+    inc(Dest);
+  end;
+  result := Dest;
+end;
+
+function TTimeLogBits.FullText(Expanded: boolean; FirstTimeChar,QuotedChar: AnsiChar): RawUTF8;
+var tmp: array[0..31] of AnsiChar;
+begin
+  FastSetString(result,@tmp,FullText(tmp,Expanded,FirstTimeChar,QuotedChar)-@tmp);
 end;
 
 function TTimeLogBits.i18nText: string;
@@ -53809,16 +53878,10 @@ begin
     dec(B);
   if Value^<>0 then begin
     inc(B);
-    if trunc(Value^)<>0 then begin
-      DateToIso8601PChar(Value^,B,true);
-      inc(B,10);
-    end;
-    if frac(Value^)<>0 then begin
-      TimeToIso8601PChar(Value^,B,true,FirstChar,WithMS);
-      if WithMS then
-        inc(B,13) else
-        inc(B,9);
-    end;
+    if trunc(Value^)<>0 then
+      B := DateToIso8601PChar(Value^,B,true);
+    if frac(Value^)<>0 then
+      B := TimeToIso8601PChar(Value^,B,true,FirstChar,WithMS);
     dec(B);
   end;
   if QuoteChar<>#0 then begin
@@ -53834,16 +53897,10 @@ begin
   if BEnd-B<=23 then
     FlushToStream;
   inc(B);
-  if trunc(Value)<>0 then begin
-    DateToIso8601PChar(Value,B,true);
-    inc(B,10);
-  end;
-  if frac(Value)<>0 then begin
-    TimeToIso8601PChar(Value,B,true,'T',WithMS);
-    if WithMS then
-      inc(B,13) else
-      inc(B,9);
-  end;
+  if trunc(Value)<>0 then
+    B := DateToIso8601PChar(Value,B,true);
+  if frac(Value)<>0 then
+    B := TimeToIso8601PChar(Value,B,true,'T',WithMS);
   dec(B);
 end;
 
@@ -55029,9 +55086,7 @@ begin
     dec(BinBytes,ChunkBytes);
     if BinBytes=0 then break;
     // Flush writes B-buf+1 -> special one below:
-    ChunkBytes := B-fTempBuf;
-    fStream.WriteBuffer(fTempBuf^,ChunkBytes);
-    inc(fTotalFileSize,ChunkBytes);
+    WriteToStream(fTempBuf,B-fTempBuf);
     B := fTempBuf;
   until false;
   dec(B); // allow CancelLastChar
@@ -55270,9 +55325,7 @@ begin
       inc(PByte(P),i);
       dec(Len,i);
       // FlushInc writes B-buf+1 -> special one below:
-      i := B-fTempBuf;
-      fStream.WriteBuffer(fTempBuf^,i);
-      inc(fTotalFileSize,i);
+      WriteToStream(fTempBuf,B-fTempBuf);
       B := fTempBuf;
     until false;
     dec(B); // allow CancelLastChar
@@ -56187,8 +56240,7 @@ begin
   i := B-fTempBuf+1;
   if i<=0 then
     exit;
-  fStream.WriteBuffer(fTempBuf^,i);
-  inc(fTotalFileSize,i);
+  WriteToStream(fTempBuf,i);
   if not (twoFlushToStreamNoAutoResize in fCustomOptions) then begin
     s := fTotalFileSize-fInitialStreamPosition;
     if (fTempBufSize<49152) and (s>PtrUInt(fTempBufSize)*4) then
@@ -56206,6 +56258,14 @@ begin
     end;
   end;
   B := fTempBuf-1;
+end;
+
+procedure TTextWriter.WriteToStream(data: pointer; len: PtrUInt);
+begin
+  if Assigned(fOnFlushToStream) then
+    fOnFlushToStream(data,len);
+  fStream.WriteBuffer(data^,len);
+  inc(fTotalFileSize,len);
 end;
 
 function TTextWriter.GetTextLength: PtrUInt;
@@ -56305,10 +56365,8 @@ begin
         main := Base64EncodeMain(PAnsiChar(fTempBuf),P,n);
         n := main*4;
         if n<cardinal(fTempBufSize)-4 then
-          inc(B,n) else begin
-          fStream.WriteBuffer(fTempBuf^,n);
-          inc(fTotalFileSize,n);
-        end;
+          inc(B,n) else
+          WriteToStream(fTempBuf,n);
         n := main*3;
         inc(P,n);
         dec(Len,n);
@@ -57776,6 +57834,7 @@ begin
 end;
 
 procedure RemoveCommentsFromJSON(P: PUTF8Char);
+var PComma: PUTF8Char;
 begin // replace comments by ' ' characters which will be ignored by parser
   if P<>nil then
   while P^<>#0 do begin
@@ -57784,6 +57843,7 @@ begin // replace comments by ' ' characters which will be ignored by parser
         P := GotoEndOfJSONString(P);
         if P^<>'"' then
           exit;
+        inc(P);
       end;
       '/': begin
          inc(P);
@@ -57793,7 +57853,8 @@ begin // replace comments by ' ' characters which will be ignored by parser
              repeat
                P^ := ' ';
                inc(P)
-             until P^ in [#0, #10, #13];
+             until P^ in [#0,#10,#13];
+             if P^<>#0 then Inc(P);
            end;
            '*': begin // this is /* comment - replace by ' ' but keep CRLF
              P[-1] := ' ';
@@ -57810,8 +57871,15 @@ begin // replace comments by ' ' characters which will be ignored by parser
            end;
          end;
       end;
+      ',': begin // replace trailing comma by space for strict JSON parsers
+        PComma := P;
+        repeat inc(P) until (P^>' ') or (P^=#0);
+        if P^ in ['}',']'] then
+          PComma^ := ' ';
+      end;
+    else
+      inc(P);
     end;
-    inc(P);
   end;
 end;
 
@@ -63073,7 +63141,9 @@ begin
       include(TEXT_CHARS[c], tcIdentifierFirstChar);
     if c in ['_','0'..'9','a'..'z','A'..'Z'] then
       include(TEXT_CHARS[c], tcIdentifier);
-    if c in ['_','-','.','~','0'..'9','a'..'z','A'..'Z'] then
+    if c in ['_','-','.','0'..'9','a'..'z','A'..'Z'] then
+      // '~' is part of the RFC 3986 but should be escaped in practice
+      // see https://blog.synopse.info/?post/2020/08/11/The-RFC%2C-The-URI%2C-and-The-Tilde
       include(TEXT_CHARS[c], tcURIUnreserved);
     if c in [#1..#9,#11,#12,#14..' '] then
       include(TEXT_CHARS[c], tcCtrlNotLF);

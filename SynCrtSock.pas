@@ -292,7 +292,8 @@ type
     // - aAddr='unix:/path/to/file' - bind to unix domain socket, e.g. 'unix:/run/mormot.sock'
     // - aAddr='' - bind to systemd descriptor on linux. See
     // http://0pointer.de/blog/projects/socket-activation.html
-    constructor Bind(const aAddr: SockString; aLayer: TCrtSocketLayer=cslTCP);
+    constructor Bind(const aAddr: SockString; aLayer: TCrtSocketLayer=cslTCP;
+      aTimeOut: integer=10000);
     /// low-level internal method called by Open() and Bind() constructors
     // - raise an ECrtSocket exception on error
     // - you may ask for a TLS secured client connection (only available under
@@ -619,6 +620,7 @@ type
   /// a genuine identifier for a given client connection on server side
   // - maps http.sys ID, or is a genuine 31-bit value from increasing sequence
   THttpServerConnectionID = Int64;
+
   /// a dynamic array of client connection identifiers, e.g. for broadcasting
   THttpServerConnectionIDDynArray = array of THttpServerConnectionID;
 
@@ -4927,14 +4929,15 @@ begin
   result := false;
 end;
 
-constructor TCrtSocket.Bind(const aAddr: SockString; aLayer: TCrtSocketLayer);
+constructor TCrtSocket.Bind(const aAddr: SockString; aLayer: TCrtSocketLayer;
+   aTimeOut: integer);
 var s,p: SockString;
     aSock: integer;
     {$ifdef LINUXNOTBSD}
     n: integer;
     {$endif}
 begin
-  Create(10000);
+  Create(aTimeOut);
   if aAddr='' then begin
     {$ifdef LINUXNOTBSD} // try systemd
     if not SystemdIsAvailable then
@@ -5434,8 +5437,8 @@ begin
         TSynLog.Add.Log(sllCustom2, 'TrySockRecv: sock=% AsynchRecv=% %',
           [Sock,read,SocketErrorMessage],self);
         {$endif}
-        if WSAIsFatalError then begin
-          Close; // connection broken or socket closed gracefully
+        if (read=0) or WSAIsFatalError then begin
+          Close; // connection broken or socket closed gracefully (read=0)
           exit;
         end;
         if StopBeforeLength then
@@ -5800,8 +5803,9 @@ begin
         exit;
       end;
       GetHeader(false); // read all other headers
-      if (result<>STATUS_NOCONTENT) and not IdemPChar(pointer(method),'HEAD') then
-        GetBody; // get content if necessary (not HEAD method)
+      if (result<>STATUS_NOCONTENT) and
+         (IdemPCharArray(pointer(method),['HEAD','OPTIONS'])<0) then
+        GetBody; // get content if necessary (HEAD or OPTIONS have no body)
     except
       on Exception do
         DoRetry(STATUS_NOTFOUND,'Exception');
@@ -6389,7 +6393,7 @@ begin
       exit;
     Sleep(1);
     if GetTick64 > tix then
-      raise ECrtSocket.CreateFmt('%s.WaitStarted failed after % seconds with %s',
+      raise ECrtSocket.CreateFmt('%s.WaitStarted failed after %d seconds [%s]',
         [ClassName,Seconds,fExecuteMessage]);
   until false;
 end;
@@ -6797,7 +6801,8 @@ begin
           HandleRequestsProcess;
       end else begin
         // call from TSynThreadPoolTHttpServer -> handle first request
-        if not fServerSock.fBodyRetrieved then
+        if not fServerSock.fBodyRetrieved and
+           (IdemPCharArray(pointer(fServerSock.fMethod),['HEAD','OPTIONS'])<0) then
           fServerSock.GetBody;
         fServer.Process(fServerSock,ConnectionID,self);
         if (fServer<>nil) and fServerSock.KeepAliveClient then
@@ -7149,7 +7154,8 @@ begin
       end;
     end;
     if withBody and not (connectionUpgrade in HeaderFlags) then begin
-      GetBody;
+      if IdemPCharArray(pointer(fMethod),['HEAD','OPTIONS'])<0 then
+        GetBody;
       result := grBodyReceived;
     end else
       result := grHeaderReceived;
@@ -7605,7 +7611,8 @@ begin
         ServerSock := nil; // THttpServerResp will own and free ServerSock
       end else begin
         // no Keep Alive = multi-connection -> process in the Thread Pool
-        if not (connectionUpgrade in ServerSock.HeaderFlags) then begin
+        if not (connectionUpgrade in ServerSock.HeaderFlags) and
+           (IdemPCharArray(pointer(ServerSock.Method),['HEAD','OPTIONS'])<0) then begin
           ServerSock.GetBody; // we need to get it now
           InterlockedIncrement(fServer.fStats[grBodyReceived]);
         end;
@@ -11905,7 +11912,6 @@ procedure TCurlHTTP.SetCACertFile(const aCertFile: SockString);
 begin
   fSSL.CACertFile := aCertFile;
 end;
-
 
 procedure TCurlHTTP.UseClientCertificate(
   const aCertFile, aCACertFile, aKeyName, aPassPhrase: SockString);
