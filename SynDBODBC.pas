@@ -292,13 +292,14 @@ type
   end;
 
 {$ifdef MSWINDOWS}
-/// List all ODBC drivers installed
+/// List all ODBC drivers installed, by reading the Windows Registry
 // - aDrivers is the output driver list container, which should be either nil (to
 // create a new TStringList), or any existing TStrings instance (may be from VCL
 // - aIncludeVersion: include the DLL driver version as <driver name>=<dll version>
 // in aDrivers (somewhat slower)
 function ODBCInstalledDriversList(const aIncludeVersion: Boolean; var aDrivers: TStrings): boolean;
 {$endif MSWINDOWS}
+
 
 implementation
 
@@ -1728,8 +1729,14 @@ begin
             if ansitext then begin
   retry:      VData := CurrentAnsiConvert.UTF8ToAnsi(VData);
               CValueType := SQL_C_CHAR;
-            end else
+            end else begin
               VData := Utf8DecodeToRawUnicode(VData);
+              if (fDBMS=dMSSQL) then begin // statements like CONTAINS(field, ?) do not accept NVARCHAR(max)
+                ColumnSize := length(VData) shr 1; // length in characters
+                if (ColumnSize > 4000) then // > 8000 bytes - use varchar(max)
+                  ColumnSize := 0;
+              end;
+            end;
           ftBlob:
             StrLen_or_Ind[p] := length(VData);
           else
@@ -2054,7 +2061,7 @@ begin
       end;
       FA.Init(TypeInfo(TSQLDBColumnDefineDynArray),Fields,@n);
       FA.Compare := SortDynArrayAnsiStringI; // FA.Find() case insensitive
-      fillchar(F,SizeOf(F),0);
+      FillcharFast(F,SizeOf(F),0);
       if fCurrentRow>0 then // Step done above
       repeat
         F.ColumnName := Trim(ColumnUTF8(3)); // Column*() should be done in order
@@ -2256,7 +2263,7 @@ begin
         Stmt.Step;
       end;
       PA.Init(TypeInfo(TSQLDBColumnDefineDynArray),Parameters,@n);
-      fillchar(P,SizeOf(P),0);
+      FillcharFast(P,SizeOf(P),0);
       if Stmt.fCurrentRow>0 then // Step done above
       repeat
         P.ColumnName := Trim(Stmt.ColumnUTF8(3)); // Column*() should be in order
