@@ -6,7 +6,7 @@ unit SynDBOracle;
 {
     This file is part of Synopse framework.
 
-    Synopse framework. Copyright (C) 2020 Arnaud Bouchez
+    Synopse framework. Copyright (C) 2021 Arnaud Bouchez
       Synopse Informatique - https://synopse.info
 
   *** BEGIN LICENSE BLOCK *****
@@ -25,7 +25,7 @@ unit SynDBOracle;
 
   The Initial Developer of the Original Code is Arnaud Bouchez.
 
-  Portions created by the Initial Developer are Copyright (C) 2020
+  Portions created by the Initial Developer are Copyright (C) 2021
   the Initial Developer. All Rights Reserved.
 
   Contributor(s):
@@ -3433,7 +3433,8 @@ begin
       while (L>0) and (fSQLPrepared[L]<=' ') do // trim right
         dec(L);
       // allow one trailing ';' by writing ';;' or allows 'END;' at the end of a statement
-      if (L>5) and (fSQLPrepared[L]=';') and not IdemPChar(@fSQLPrepared[L-3],'END') then
+      if (L>5) and (fSQLPrepared[L]=';') and not
+         (IdemPChar(@fSQLPrepared[L-3],'END') and (fSQLPrepared[L-4]<='A')) then
         dec(L);
       if L<>Length(fSQLPrepared) then
         SetLength(fSQLPrepared,L); // trim trailing spaces or ';' if needed

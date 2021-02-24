@@ -6,7 +6,7 @@ unit mORMot;
 (*
     This file is part of Synopse mORMot framework.
 
-    Synopse mORMot framework. Copyright (C) 2020 Arnaud Bouchez
+    Synopse mORMot framework. Copyright (C) 2021 Arnaud Bouchez
       Synopse Informatique - https://synopse.info
 
   *** BEGIN LICENSE BLOCK *****
@@ -25,7 +25,7 @@ unit mORMot;
 
   The Initial Developer of the Original Code is Arnaud Bouchez.
 
-  Portions created by the Initial Developer are Copyright (C) 2020
+  Portions created by the Initial Developer are Copyright (C) 2021
   the Initial Developer. All Rights Reserved.
 
   Contributor(s):
@@ -3441,7 +3441,7 @@ type
   end;
 
 var
-  /// acccess to Zip Deflate compression in level 6 as a TSynCompress class
+  /// acccess to Zip Deflate compression in level 6 as a TAlgoCompress class
   AlgoDeflate: TAlgoCompress;
   /// acccess to Zip Deflate compression in level 1 as a TAlgoCompress class
   AlgoDeflateFast: TAlgoCompress;
@@ -6907,6 +6907,9 @@ type
     // EORMException: in this case, you should use a TID / T*ID kind of
     // published property, and not a TSQLRecord, which is limited to the
     // pointer size
+    // - on FPC, if you get an Error: Incompatible types: got "Pointer" expected
+    // "T...", then you are missing a {$mode Delphi} conditional in your unit:
+    // the easiest is to include {$I Synopse.inc} at the top of your unit
     property AsTSQLRecord: pointer read GetIDAsPointer;
     /// this property is set to true, if any published property is a BLOB (TSQLRawBlob)
     property HasBlob: boolean read GetHasBlob;
@@ -9054,7 +9057,7 @@ type
 
   /// this base class will create a FTS3 table using the Unicode61 Stemming algorithm
   // - see http://sqlite.org/fts3.html#tokenizer
-  // - will generate tokenize=unicode64 by convention from the class name
+  // - will generate tokenize=unicode61 by convention from the class name
   TSQLRecordFTS3Unicode61 = class(TSQLRecordFTS3);
 
   /// a base record, corresponding to a FTS4 table, which is an enhancement to FTS3
@@ -9085,7 +9088,7 @@ type
 
   /// this base class will create a FTS4 table using the Unicode61 Stemming algorithm
   // - see http://sqlite.org/fts3.html#tokenizer
-  // - will generate tokenize=unicode64 by convention from the class name
+  // - will generate tokenize=unicode61 by convention from the class name
   TSQLRecordFTS4Unicode61 = class(TSQLRecordFTS4);
 
   /// a base record, corresponding to a FTS5 table, which is an enhancement to FTS4
@@ -9107,7 +9110,7 @@ type
 
   /// this base class will create a FTS5 table using the Unicode61 Stemming algorithm
   // - see https://sqlite.org/fts5.html#tokenizers
-  // - will generate tokenize=unicode64 by convention from the class name
+  // - will generate tokenize=unicode61 by convention from the class name
   TSQLRecordFTS5Unicode61 = class(TSQLRecordFTS5);
 
   /// class-reference type (metaclass) of a FTS3/FTS4/FTS5 virtual table
@@ -15839,6 +15842,7 @@ type
   // unless rsoGetUserRetrieveNoBlobData is defined
   // - rsoNoInternalState could be state to avoid transmitting the
   // 'Server-InternalState' header, e.g. if the clients wouldn't need it
+  // - rsoNoTableURI will disable any /root/tablename URI for safety
   TSQLRestServerOption = (
     rsoNoAJAXJSON,
     rsoGetAsJsonNotAsString,
@@ -15854,7 +15858,8 @@ type
     rsoTimestampInfoURIDisable,
     rsoHttpHeaderCheckDisable,
     rsoGetUserRetrieveNoBlobData,
-    rsoNoInternalState);
+    rsoNoInternalState,
+    rsoNoTableURI);
   /// allow to customize the TSQLRestServer process via its Options property
   TSQLRestServerOptions = set of TSQLRestServerOption;
 
@@ -16014,6 +16019,13 @@ type
     // - will perform any needed clean-up, and log the event
     // - this method is not thread-safe: caller should use Sessions.Lock/Unlock
     procedure SessionDelete(aSessionIndex: integer; Ctxt: TSQLRestServerURIContext);
+    /// SessionAccess will detect and delete outdated sessions, but you can call
+    // this method to force checking for deprecated session now
+    // - may be used e.g. from OnSessionCreate to limit the number of active sessions
+    // - this method is not thread-safe: caller should use Sessions.Lock/Unlock
+    // - you can call it often: it will seek for outdated sessions once per second
+    // - returns the current system Ticks number (at second resolution)
+    function SessionDeleteDeprecated: cardinal;
     /// returns TRUE if this table is worth caching (e.g. already in memory)
     // - this overridden implementation returns FALSE for TSQLRestStorageInMemory
     function CacheWorthItForTable(aTableIndex: cardinal): boolean; override;
@@ -17888,7 +17900,7 @@ type
     // same time, you should better use BATCH process, specifying a positive
     // AutomaticTransactionPerRow parameter to BatchStart()
     function TransactionBegin(aTable: TSQLRecordClass;
-  	  SessionID: cardinal=CONST_AUTHENTICATION_NOT_USED): boolean; override;
+      SessionID: cardinal=CONST_AUTHENTICATION_NOT_USED): boolean; override;
     /// end a transaction (calls REST END Member)
     // - by default, Client transaction will use here a pseudo session
     procedure Commit(SessionID: cardinal=CONST_AUTHENTICATION_NOT_USED;
@@ -29736,7 +29748,7 @@ begin
   {$endif}
 end;
 
-function TEnumType.GetCaptionStrings(UsedValuesBits: Pointer=nil): string;
+function TEnumType.GetCaptionStrings(UsedValuesBits: Pointer): string;
 var List: TStringList;
 begin
   List := TStringList.Create;
@@ -30246,7 +30258,7 @@ end;
 
 function SQLWhereIsEndClause(const Where: RawUTF8): boolean;
 begin
-  result := IdemPCharArray(pointer(Where),['ORDER BY ','GROUP BY ',
+  result := IdemPCharArray(GotoNextNotSpace(pointer(Where)),['ORDER BY ','GROUP BY ',
     'LIMIT ','OFFSET ','LEFT ','RIGHT ','INNER ','OUTER ','JOIN '])>=0;
 end;
 
@@ -31242,15 +31254,17 @@ begin
       end;
       for i := 0 to fields.Count-1 do
         result := result+fields.List[i].Name+',';
-      tokenizer := 'simple';
+      if Props.Kind=rFTS5 then // FTS5 knows ascii/porter/unicode61
+        tokenizer := 'ascii' else
+        tokenizer := 'simple'; // FTS3-4 know simple/porter/unicode61
       c := self;
       repeat
         ToText(c,cname); // TSQLFTSTest = class(TSQLRecordFTS3Porter)
         if IdemPChar(pointer(cname),'TSQLRECORDFTS') and
            (cname[14] in ['3','4','5']) then begin
           if length(cname)>14 then
-            tokenizer := copy(cname,15,100); // e.g. TSQLRecordFTS3Porter -> 'Porter'
-          break;
+            tokenizer := copy(cname,15,100);
+          break; // e.g. TSQLRecordFTS3Porter -> 'Porter'
         end;
         c := GetClassParent(c);
       until c=TSQLRecord;
@@ -34739,11 +34753,15 @@ end;
 function TSQLRest.Retrieve(const SQLWhere: RawUTF8; Value: TSQLRecord;
   const aCustomFieldsCSV: RawUTF8): boolean;
 var T: TSQLTable;
+    sql: RawUTF8;
 begin
   result := false;
   if (self=nil) or (Value=nil) then
     exit;
-  T := MultiFieldValues(PSQLRecordClass(Value)^,aCustomFieldsCSV,SQLWhere);
+  sql := Trim(SQLWhere);
+  if not EndWith(sql,' LIMIT 1') then
+    sql := sql+' LIMIT 1'; // we keep a single record below
+  T := MultiFieldValues(PSQLRecordClass(Value)^,aCustomFieldsCSV,sql);
   if T<>nil then
     try
       if T.fRowCount>=1 then begin
@@ -35845,7 +35863,7 @@ procedure TSQLRest.EndCurrentThread(Sender: TThread);
 begin // most will be done e.g. in TSQLRestServer.EndCurrentThread
   {$ifdef WITHLOG}
   fLogFamily.OnThreadEnded(Sender);
-  {$endif}
+  {$endif WITHLOG}
 end;
 
 procedure TSQLRest.WriteLock;
@@ -38194,7 +38212,7 @@ begin
   aMethodName := trim(aMethodName);
   if aMethodName='' then
     raise EServiceException.CreateUTF8('%.ServiceMethodRegister('''')',[self]);
-  if Model.GetTableIndex(aMethodName)>=0 then
+  if not(rsoNoTableURI in fOptions) and (Model.GetTableIndex(aMethodName)>=0) then
     raise EServiceException.CreateUTF8('Published method name %.% '+
       'conflicts with a Table in the Model!',[self,aMethodName]);
   with PSQLRestServerMethod(fPublishedMethods.AddUniqueName(aMethodName,
@@ -39487,7 +39505,9 @@ end;
 procedure TSQLRestServerURIContext.InternalSetTableFromTableName(TableName: PUTF8Char);
 begin
   TableEngine := Server;
-  InternalSetTableFromTableIndex(Server.Model.GetTableIndexPtr(TableName));
+  if rsoNoTableURI in Server.Options then
+    TableIndex := -1 else
+    InternalSetTableFromTableIndex(Server.Model.GetTableIndexPtr(TableName));
   if TableIndex<0 then
     exit;
   Static := Server.GetStaticTableIndex(TableIndex,StaticKind);
@@ -40889,7 +40909,7 @@ begin
        (Length(Result)>64) then begin
       FindNameValue(Call.InHead,'IF-NONE-MATCH: ',clientHash);
       if ServerHash='' then
-        ServerHash := '"'+crc32cUTF8ToHex(Result)+'"';
+        ServerHash := crc32cUTF8ToHex(Result);
       ServerHash := '"'+ServerHash+'"';
       if clientHash<>ServerHash then
         Call.OutHead := Call.OutHead+#13#10'ETag: '+ServerHash else begin
@@ -41974,7 +41994,7 @@ begin
 end;
 
 procedure TSQLRestServer.Auth(Ctxt: TSQLRestServerURIContext);
-var i: integer;
+var i: PtrInt;
 begin
   if fSessionAuthentication=nil then
     exit;
@@ -42024,7 +42044,7 @@ end;
 procedure TSQLRestServer.SessionDelete(aSessionIndex: integer;
   Ctxt: TSQLRestServerURIContext);
 var sess: TAuthSession;
-begin
+begin // caller made fSessions.Safe.Lock
   if (self<>nil) and (cardinal(aSessionIndex)<cardinal(fSessions.Count)) then begin
     sess := fSessions.List[aSessionIndex];
     if Services<>nil then
@@ -42041,38 +42061,48 @@ begin
   end;
 end;
 
+function TSQLRestServer.SessionDeleteDeprecated: cardinal;
+var i: PtrInt;
+begin // caller made fSessions.Safe.Lock
+  result := GetTickCount64 shr 10;
+  if (self<>nil) and (fSessions<>nil) then begin
+    if result<>fSessionsDeprecatedTix then begin
+      fSessionsDeprecatedTix := result; // check sessions every second
+      for i := fSessions.Count-1 downto 0 do
+        if result>TAuthSession(fSessions.List[i]).TimeOutTix then
+          SessionDelete(i,nil);
+    end;
+  end;
+end;
+
 function TSQLRestServer.SessionAccess(Ctxt: TSQLRestServerURIContext): TAuthSession;
 var i: integer;
     tix, session: cardinal;
     sessions: ^TAuthSession;
-begin // caller of RetrieveSession() made fSessions.Safe.Lock
+begin // caller made fSessions.Safe.Lock
   if (self<>nil) and (fSessions<>nil) then begin
-    tix := GetTickCount64 shr 10;
-    if tix<>fSessionsDeprecatedTix then begin
-      fSessionsDeprecatedTix := tix; // check deprecated sessions every second
-      for i := fSessions.Count-1 downto 0 do
-        if tix>TAuthSession(fSessions.List[i]).TimeOutTix then
-          SessionDelete(i,nil);
-    end;
+    // check deprecated sessions every second
+    tix := SessionDeleteDeprecated;
     // retrieve session from its ID
     sessions := pointer(fSessions.List);
     session := Ctxt.Session;
-    for i := 1 to fSessions.Count do
-      if sessions^.IDCardinal=session then begin
-        result := sessions^;
-        result.fTimeOutTix := tix+result.TimeoutShr10;
-        Ctxt.fSession := result; // for TSQLRestServer internal use
-        // make local copy of TAuthSession information
-        Ctxt.SessionUser := result.User.fID;
-        Ctxt.SessionGroup := result.User.GroupRights.fID;
-        Ctxt.SessionUserName := result.User.LogonName;
-        if (result.RemoteIP<>'') and (Ctxt.fRemoteIP='') then
-          Ctxt.fRemoteIP := result.RemoteIP;
-        Ctxt.fSessionAccessRights := result.fAccessRights;
-        Ctxt.Call^.RestAccessRights := @Ctxt.fSessionAccessRights;
-        exit;
-      end else
-        inc(sessions);
+    if session>CONST_AUTHENTICATION_NOT_USED then
+      for i := 1 to fSessions.Count do
+        if sessions^.IDCardinal=session then begin
+          result := sessions^;
+          result.fTimeOutTix := tix+result.TimeoutShr10;
+          Ctxt.fSession := result; // for TSQLRestServer internal use
+          // make local copy of TAuthSession information
+          Ctxt.SessionUser := result.User.fID;
+          Ctxt.SessionGroup := result.User.GroupRights.fID;
+          Ctxt.SessionUserName := result.User.LogonName;
+          if (result.RemoteIP<>'') and (Ctxt.fRemoteIP='') then
+            Ctxt.fRemoteIP := result.RemoteIP;
+          Ctxt.fSessionAccessRights := result.fAccessRights;
+          Ctxt.Call^.RestAccessRights := @Ctxt.fSessionAccessRights;
+          exit;
+        end else
+          inc(sessions);
   end;
   result := nil;
 end;
@@ -58075,7 +58105,7 @@ begin
       fImplementationClass.GetInterfaceEntry(fInterface.fInterfaceIID);
     if fImplementationClassInterfaceEntry=nil then
       raise EServiceException.CreateUTF8('%.Create: % does not implement I%',
-        [self,fImplementationClass,fInterfaceURI]) else
+        [self,fImplementationClass,fInterfaceURI]);
   end;
   if (fInterface.MethodIndexCallbackReleased>=0) and
      (InstanceCreation<>sicShared) then
